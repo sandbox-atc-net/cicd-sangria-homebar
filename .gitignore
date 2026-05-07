@@ -43,3 +43,9 @@ x86/
 
 # Publish Web Output
 *.[Pp]ublish.xml
+
+# SQLite runtime database — regenerated from Data/cocktail-data.json
+cocktail.db
+cocktail.db-journal
+cocktail.db-wal
+cocktail.db-shm

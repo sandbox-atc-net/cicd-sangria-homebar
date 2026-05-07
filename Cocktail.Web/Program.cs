@@ -16,6 +16,27 @@ builder.Services.AddScoped<RecipeService>();
 
 var app = builder.Build();
 
+// CLI: `dotnet run -- seed-from-file` — load the checked-in JSON into an empty DB
+if (args.Length > 0 && args[0].Equals("seed-from-file", StringComparison.OrdinalIgnoreCase))
+{
+    using var scope = app.Services.CreateScope();
+    var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<CocktailDb>>();
+    using var db = factory.CreateDbContext();
+    Seed.EnsureSeeded(db, builder.Environment.ContentRootPath);
+    return;
+}
+
+// CLI: `dotnet run -- export-data` — dumps the current DB to Data/cocktail-data.json
+if (args.Length > 0 && args[0].Equals("export-data", StringComparison.OrdinalIgnoreCase))
+{
+    using var scope = app.Services.CreateScope();
+    var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<CocktailDb>>();
+    using var db = factory.CreateDbContext();
+    db.Database.EnsureCreated();
+    await Seed.ExportAsync(db, builder.Environment.ContentRootPath, CancellationToken.None);
+    return;
+}
+
 // CLI: `dotnet run -- seed-from-api [--clear] [--max N]`
 if (args.Length > 0 && args[0].Equals("seed-from-api", StringComparison.OrdinalIgnoreCase))
 {
@@ -58,7 +79,7 @@ using (var scope = app.Services.CreateScope())
 {
     var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<CocktailDb>>();
     using var db = factory.CreateDbContext();
-    Seed.EnsureSeeded(db);
+    Seed.EnsureSeeded(db, builder.Environment.ContentRootPath);
 }
 
 app.Run();

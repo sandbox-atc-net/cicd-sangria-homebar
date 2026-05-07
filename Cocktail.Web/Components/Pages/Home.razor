@@ -1,5 +1,6 @@
 @page "/"
 @rendermode InteractiveServer
+@using Cocktail.Web.Services
 @inject Cocktail.Web.Services.RecipeService Recipes
 @inject NavigationManager Nav
 
@@ -32,7 +33,7 @@
 
 <div class="toolbar">
     <input type="search"
-           placeholder="Search by name or ingredient"
+           placeholder='Try "rye and Campari" or a drink name'
            value="@query"
            @oninput="OnQueryChanged"
            class="search" />
@@ -40,7 +41,111 @@
         <input type="checkbox" checked="@onlyMakeable" @onchange="OnMakeableToggled" />
         Only what I can make now
     </label>
+    <button class="btn primary" @onclick="OnSurprise" title="Pick a random recipe matching the current filters">🎲 Surprise me</button>
+    <button class="btn" @onclick="ClearFilters" disabled="@(!HasActiveFilters)">Clear filters</button>
 </div>
+
+<div class="ingredient-pills" aria-label="Ingredient filter">
+    @if (ingredientFilter.Count > 0)
+    {
+        @foreach (var ing in ingredientFilter)
+        {
+            <span class="pill ingredient-pill">
+                @ing
+                <button class="pill-x" @onclick="() => RemoveIngredient(ing)" aria-label="Remove">×</button>
+            </span>
+        }
+    }
+    <input class="pill-input"
+           placeholder="+ ingredient"
+           @bind="ingredientDraft"
+           @bind:event="oninput"
+           @onkeydown="OnIngredientKey" />
+    <button class="btn-link" @onclick="AddIngredient" disabled="@string.IsNullOrWhiteSpace(ingredientDraft)">add</button>
+</div>
+
+<details class="filter-panel" open="@filtersOpen">
+    <summary @onclick:preventDefault="true" @onclick="ToggleFilters">
+        Filters @(ActiveChipCount > 0 ? $"({ActiveChipCount} active)" : "")
+    </summary>
+
+    <div class="filter-group">
+        <span class="filter-label">Style</span>
+        @foreach (var s in RecipeFacets.AllStyles)
+        {
+            var on = styleFilter.Contains(s);
+            <button type="button"
+                    class="@("chip" + (on ? " on" : ""))"
+                    @onclick="() => ToggleStyle(s)">@s</button>
+        }
+    </div>
+
+    <div class="filter-group">
+        <span class="filter-label">Technique</span>
+        @foreach (var t in RecipeFacets.AllTechniques)
+        {
+            var on = techniqueFilter.Contains(t);
+            <button type="button"
+                    class="@("chip" + (on ? " on" : ""))"
+                    @onclick="() => ToggleTechnique(t)">@t</button>
+        }
+    </div>
+
+    <div class="filter-group">
+        <span class="filter-label">Prep time</span>
+        @foreach (var p in Enum.GetValues<PrepTimeBucket>())
+        {
+            var on = prepFilter == p;
+            <button type="button"
+                    class="@("chip" + (on ? " on" : ""))"
+                    @onclick="() => SetPrep(p)">@PrepLabel(p)</button>
+        }
+    </div>
+
+    <div class="filter-group">
+        <span class="filter-label">Difficulty</span>
+        @foreach (var d in Enum.GetValues<DifficultyLevel>())
+        {
+            var on = difficultyFilter == d;
+            <button type="button"
+                    class="@("chip" + (on ? " on" : ""))"
+                    @onclick="() => SetDifficulty(d)">@d</button>
+        }
+    </div>
+
+    @if (facets is not null)
+    {
+        <div class="filter-group">
+            <span class="filter-label">Glassware</span>
+            <select class="dropdown" value="@glasswareFilter" @onchange="OnGlasswareChanged">
+                <option value="">Any</option>
+                @foreach (var g in facets.Glassware)
+                {
+                    <option value="@g">@g</option>
+                }
+            </select>
+        </div>
+
+        <div class="filter-group">
+            <span class="filter-label">Category</span>
+            <select class="dropdown" value="@methodFilter" @onchange="OnMethodChanged">
+                <option value="">Any</option>
+                @foreach (var m in facets.Methods)
+                {
+                    <option value="@m">@m</option>
+                }
+            </select>
+        </div>
+    }
+</details>
+
+@if (surpriseHit is not null)
+{
+    <div class="surprise-flash">
+        🎲 Tonight's pick: <a href="/recipe/@surpriseHit.Id">@surpriseHit.Name</a>
+        <button class="btn-link" @onclick="() => surpriseHit = null">dismiss</button>
+    </div>
+}
 
 @if (results is null)
 {
@@ -48,10 +153,11 @@
 }
 else if (results.Count == 0)
 {
-    <p>No matching recipes.</p>
+    <p>No matching recipes. Try widening the filters.</p>
 }
 else
 {
+    <p class="result-count">@results.Count recipe@(results.Count == 1 ? "" : "s")</p>
     <ul class="recipe-list">
         @foreach (var r in results)
         {
@@ -76,13 +182,55 @@ else
 
     string query = "";
     bool onlyMakeable;
-    List<Cocktail.Web.Services.RecipeListItem>? results;
+    bool filtersOpen;
+    string ingredientDraft = "";
+    List<string> ingredientFilter = new();
+    HashSet<string> styleFilter = new(StringComparer.OrdinalIgnoreCase);
+    HashSet<Technique> techniqueFilter = new();
+    PrepTimeBucket? prepFilter;
+    DifficultyLevel? difficultyFilter;
+    string glasswareFilter = "";
+    string methodFilter = "";
 
-    protected override Task OnInitializedAsync()
+    List<RecipeListItem>? results;
+    RecipeFacetsSummary? facets;
+    RecipeListItem? surpriseHit;
+
+    bool HasActiveFilters =>
+        !string.IsNullOrEmpty(query)
+        || ingredientFilter.Count > 0
+        || styleFilter.Count > 0
+        || techniqueFilter.Count > 0
+        || prepFilter is not null
+        || difficultyFilter is not null
+        || !string.IsNullOrEmpty(glasswareFilter)
+        || !string.IsNullOrEmpty(methodFilter);
+
+    int ActiveChipCount =>
+        styleFilter.Count
+        + techniqueFilter.Count
+        + (prepFilter is null ? 0 : 1)
+        + (difficultyFilter is null ? 0 : 1)
+        + (string.IsNullOrEmpty(glasswareFilter) ? 0 : 1)
+        + (string.IsNullOrEmpty(methodFilter) ? 0 : 1);
+
+    protected override async Task OnInitializedAsync()
     {
         onlyMakeable = Makeable;
-        return Refresh();
+        facets = await Recipes.GetFacetsSummaryAsync(CancellationToken.None);
+        await Refresh();
     }
+
+    SearchCriteria CurrentCriteria() => new(
+        Query: query,
+        OnlyMakeable: onlyMakeable,
+        Ingredients: ingredientFilter.Count > 0 ? ingredientFilter : null,
+        Styles: styleFilter.Count > 0 ? styleFilter.ToList() : null,
+        Techniques: techniqueFilter.Count > 0 ? techniqueFilter.ToList() : null,
+        Glassware: string.IsNullOrEmpty(glasswareFilter) ? null : glasswareFilter,
+        Method: string.IsNullOrEmpty(methodFilter) ? null : methodFilter,
+        PrepTime: prepFilter,
+        Difficulty: difficultyFilter);
 
     async Task OnQueryChanged(ChangeEventArgs e)
     {
@@ -102,10 +250,113 @@ else
         await Refresh();
     }
 
+    async Task ToggleStyle(string s)
+    {
+        if (!styleFilter.Add(s)) styleFilter.Remove(s);
+        await Refresh();
+    }
+
+    async Task ToggleTechnique(Technique t)
+    {
+        if (!techniqueFilter.Add(t)) techniqueFilter.Remove(t);
+        await Refresh();
+    }
+
+    async Task SetPrep(PrepTimeBucket p)
+    {
+        prepFilter = prepFilter == p ? null : p;
+        await Refresh();
+    }
+
+    async Task SetDifficulty(DifficultyLevel d)
+    {
+        difficultyFilter = difficultyFilter == d ? null : d;
+        await Refresh();
+    }
+
+    async Task OnGlasswareChanged(ChangeEventArgs e)
+    {
+        glasswareFilter = e.Value?.ToString() ?? "";
+        await Refresh();
+    }
+
+    async Task OnMethodChanged(ChangeEventArgs e)
+    {
+        methodFilter = e.Value?.ToString() ?? "";
+        await Refresh();
+    }
+
+    async Task OnIngredientKey(KeyboardEventArgs e)
+    {
+        if (e.Key is "Enter" or ",")
+        {
+            await AddIngredient();
+        }
+    }
+
+    async Task AddIngredient()
+    {
+        var raw = ingredientDraft.Trim().Trim(',').Trim();
+        if (string.IsNullOrEmpty(raw)) return;
+
+        // Parse "rye and Campari" / "rye, lime" into separate pills.
+        var parsed = RecipeFacets.ParseIngredientList(raw);
+        var added = false;
+        foreach (var p in parsed)
+        {
+            if (!ingredientFilter.Contains(p, StringComparer.OrdinalIgnoreCase))
+            {
+                ingredientFilter.Add(p);
+                added = true;
+            }
+        }
+        if (!added && !ingredientFilter.Contains(raw, StringComparer.OrdinalIgnoreCase))
+        {
+            ingredientFilter.Add(raw.ToLowerInvariant());
+        }
+        ingredientDraft = "";
+        await Refresh();
+    }
+
+    async Task RemoveIngredient(string ing)
+    {
+        ingredientFilter.RemoveAll(i => string.Equals(i, ing, StringComparison.OrdinalIgnoreCase));
+        await Refresh();
+    }
+
+    async Task ClearFilters()
+    {
+        query = "";
+        ingredientFilter.Clear();
+        styleFilter.Clear();
+        techniqueFilter.Clear();
+        prepFilter = null;
+        difficultyFilter = null;
+        glasswareFilter = "";
+        methodFilter = "";
+        surpriseHit = null;
+        await Refresh();
+    }
+
+    async Task OnSurprise()
+    {
+        surpriseHit = await Recipes.GetSurpriseAsync(CurrentCriteria(), CancellationToken.None);
+    }
+
+    void ToggleFilters() => filtersOpen = !filtersOpen;
+
     async Task Refresh()
     {
-        results = await Recipes.SearchAsync(query, onlyMakeable, CancellationToken.None);
+        results = await Recipes.SearchAsync(CurrentCriteria(), CancellationToken.None);
     }
 
     void Open(int id) => Nav.NavigateTo($"/recipe/{id}");
+
+    static string PrepLabel(PrepTimeBucket b) => b switch
+    {
+        PrepTimeBucket.Quick => "Quick (≤2 min)",
+        PrepTimeBucket.Medium => "Medium",
+        PrepTimeBucket.Long => "Long",
+        _ => b.ToString(),
+    };
 }

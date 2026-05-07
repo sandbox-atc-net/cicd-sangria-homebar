@@ -125,3 +125,39 @@ h1 { margin-top: 0; }
 .shopping-stats .badge.unlock { background: #2ea043; color: #fff; }
 .shopping-stats .badge.needed { background: #ece5d6; color: #6e6655; }
 .shopping-samples { font-size: 0.85rem; color: #666; }
+
+/* Discovery filters */
+.ingredient-pills { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0.25rem 0 0.75rem; }
+.pill { display: inline-flex; align-items: center; gap: 0.3rem; background: #ece5d6; color: #4a3f25; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.85rem; }
+.pill.ingredient-pill { background: #f6e0b9; color: #6e4a13; }
+.pill-x { background: none; border: none; color: inherit; cursor: pointer; font-size: 1.05rem; line-height: 1; padding: 0; }
+.pill-input { padding: 0.3rem 0.55rem; font-size: 0.85rem; border: 1px dashed #c8c0b3; border-radius: 999px; background: #fff; min-width: 140px; }
+
+.filter-panel { background: #fff; border: 1px solid #e6dfd1; border-radius: 0.5rem; padding: 0.6rem 0.9rem; margin-bottom: 1rem; }
+.filter-panel summary { cursor: pointer; font-weight: 600; user-select: none; }
+.filter-group { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; padding: 0.5rem 0; border-top: 1px dashed #eee; }
+.filter-group:first-of-type { border-top: none; }
+.filter-label { font-size: 0.8rem; color: #6e6655; text-transform: uppercase; letter-spacing: 0.04em; min-width: 5.5rem; }
+
+.chip { padding: 0.3rem 0.7rem; border: 1px solid #c8c0b3; background: #fff; border-radius: 999px; cursor: pointer; font-size: 0.85rem; color: #4a3f25; }
+.chip:hover { background: #f5efe4; }
+.chip.on { background: #b85c1d; color: #fff; border-color: #b85c1d; }
+
+.dropdown { padding: 0.35rem 0.6rem; border: 1px solid #c8c0b3; border-radius: 0.4rem; background: #fff; font-size: 0.9rem; }
+
+.surprise-flash { padding: 0.7rem 1rem; background: #f6e0b9; border-left: 4px solid #d99a2b; border-radius: 0.4rem; margin-bottom: 1rem; display: flex; gap: 0.75rem; align-items: center; }
+.surprise-flash a { font-weight: 700; color: #7a4a0d; }
+
+.result-count { color: #666; font-size: 0.9rem; margin: 0.25rem 0 0.75rem; }
+
+/* Variations */
+.variations { margin-top: 2rem; }
+.variations-hint { color: #666; font-size: 0.9rem; margin-top: -0.4rem; }
+.variation-list { list-style: none; padding: 0; display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.variation-card { background: #fff; padding: 0.85rem 1rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06); cursor: pointer; transition: transform 0.1s; }
+.variation-card:hover { transform: translateY(-2px); }
+.variation-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.variation-card h3 { margin: 0 0 0.3rem 0; font-size: 1.05rem; }
+.similarity-pill { font-size: 0.75rem; font-weight: 600; background: #ece5d6; color: #6e6655; padding: 0.15rem 0.5rem; border-radius: 999px; white-space: nowrap; }
+.shared { font-size: 0.85rem; color: #1e5b32; margin-top: 0.3rem; }
+.new-ing { font-size: 0.85rem; color: #6e4a13; margin-top: 0.15rem; }

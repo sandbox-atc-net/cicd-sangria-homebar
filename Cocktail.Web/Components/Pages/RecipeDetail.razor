@@ -7,6 +7,7 @@
 @inject Cocktail.Web.Services.RecipeService Recipes
 @inject Cocktail.Web.Services.SubstitutionService Subs
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
 <PageTitle>@(recipe?.Name ?? "Recipe")</PageTitle>
 
@@ -97,6 +98,34 @@ else
     </section>
 
     <CountdownTimer @ref="timerComponent" OnComplete="OnTimerComplete" />
+
+    @if (variations is not null && variations.Count > 0)
+    {
+        <section class="variations">
+            <h2>Riffs on @recipe.Name</h2>
+            <p class="variations-hint">Recipes that share most of the spec — a good starting point if you want to twist this one.</p>
+            <ul class="variation-list">
+                @foreach (var v in variations)
+                {
+                    <li class="variation-card" @onclick="() => Open(v.Id)">
+                        <div class="variation-head">
+                            <h3>@v.Name</h3>
+                            <span class="similarity-pill" title="Ingredient overlap (Jaccard)">@((int)(v.Similarity * 100))% match</span>
+                        </div>
+                        <div class="meta">@v.Method · @v.Glassware</div>
+                        @if (v.SharedIngredients.Count > 0)
+                        {
+                            <div class="shared">Shares: @string.Join(", ", v.SharedIngredients)</div>
+                        }
+                        @if (v.NewIngredients.Count > 0)
+                        {
+                            <div class="new-ing">Adds: @string.Join(", ", v.NewIngredients)</div>
+                        }
+                    </li>
+                }
+            </ul>
+        </section>
+    }
 }
 
 @code {
@@ -105,6 +134,7 @@ else
     [Parameter] public int Id { get; set; }
 
     Recipe? recipe;
+    List<RecipeVariation>? variations;
     HashSet<string> inStock = new(StringComparer.OrdinalIgnoreCase);
     int stepIndex;
     bool listening;
@@ -125,7 +155,10 @@ else
     {
         recipe = await Recipes.GetAsync(Id, CancellationToken.None);
         inStock = await Recipes.GetInStockNamesAsync(CancellationToken.None);
+        variations = await Recipes.GetVariationsAsync(Id, max: 5, CancellationToken.None);
     }
+
+    void Open(int id) => Nav.NavigateTo($"/recipe/{id}", forceLoad: false);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

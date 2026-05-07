@@ -1,0 +1,76 @@
+@page "/"
+@rendermode InteractiveServer
+@inject Cocktail.Web.Services.RecipeService Recipes
+@inject NavigationManager Nav
+
+<PageTitle>Cocktails</PageTitle>
+
+<h1>Cocktails</h1>
+
+<div class="toolbar">
+    <input type="search"
+           placeholder="Search by name or ingredient"
+           value="@query"
+           @oninput="OnQueryChanged"
+           class="search" />
+    <label class="toggle">
+        <input type="checkbox" checked="@onlyMakeable" @onchange="OnMakeableToggled" />
+        Only what I can make now
+    </label>
+</div>
+
+@if (results is null)
+{
+    <p><em>Loading…</em></p>
+}
+else if (results.Count == 0)
+{
+    <p>No matching recipes.</p>
+}
+else
+{
+    <ul class="recipe-list">
+        @foreach (var r in results)
+        {
+            <li class="recipe-card" @onclick="() => Open(r.Id)">
+                <h3>@r.Name</h3>
+                <div class="meta">@r.Method · @r.Glassware</div>
+                @if (r.MissingIngredients.Count > 0)
+                {
+                    <div class="missing">Missing: @string.Join(", ", r.MissingIngredients)</div>
+                }
+                else
+                {
+                    <div class="ready">Ready to make</div>
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    string query = "";
+    bool onlyMakeable;
+    List<Cocktail.Web.Services.RecipeListItem>? results;
+
+    protected override Task OnInitializedAsync() => Refresh();
+
+    async Task OnQueryChanged(ChangeEventArgs e)
+    {
+        query = e.Value?.ToString() ?? "";
+        await Refresh();
+    }
+
+    async Task OnMakeableToggled(ChangeEventArgs e)
+    {
+        onlyMakeable = e.Value is true;
+        await Refresh();
+    }
+
+    async Task Refresh()
+    {
+        results = await Recipes.SearchAsync(query, onlyMakeable, CancellationToken.None);
+    }
+
+    void Open(int id) => Nav.NavigateTo($"/recipe/{id}");
+}

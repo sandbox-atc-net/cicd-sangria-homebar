@@ -1,0 +1,207 @@
+@page "/recipe/{Id:int}"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@inject Cocktail.Web.Services.RecipeService Recipes
+@inject IJSRuntime JS
+
+<PageTitle>@(recipe?.Name ?? "Recipe")</PageTitle>
+
+@if (recipe is null)
+{
+    <p><em>Loading…</em></p>
+}
+else
+{
+    <div class="recipe-header">
+        <h1>@recipe.Name</h1>
+        <div class="meta">@recipe.Method · @recipe.Glassware @(string.IsNullOrEmpty(recipe.Garnish) ? "" : "· " + recipe.Garnish)</div>
+    </div>
+
+    <section class="ingredients">
+        <h2>Ingredients</h2>
+        <ul>
+            @foreach (var ing in recipe.Ingredients)
+            {
+                <li><strong>@ing.Amount</strong> @ing.IngredientName</li>
+            }
+        </ul>
+    </section>
+
+    <section class="walkthrough">
+        <h2>Steps</h2>
+
+        <div class="step-controls">
+            <button @onclick="ToggleListening" class="@(listening ? "btn primary listening" : "btn primary")">
+                @(listening ? "Stop listening" : "Start hands-free mode")
+            </button>
+            <button @onclick="Prev" class="btn" disabled="@(stepIndex <= 0)">◀ Back</button>
+            <button @onclick="Repeat" class="btn">Repeat</button>
+            <button @onclick="Next" class="btn" disabled="@(stepIndex >= recipe.Steps.Count - 1)">Next ▶</button>
+        </div>
+
+        @if (lastHeard is not null)
+        {
+            <div class="heard">Heard: <em>@lastHeard</em></div>
+        }
+        @if (errorText is not null)
+        {
+            <div class="error">@errorText</div>
+        }
+
+        <ol class="steps">
+            @for (var i = 0; i < recipe.Steps.Count; i++)
+            {
+                var stepText = recipe.Steps[i].Instruction;
+                var current = i == stepIndex;
+                <li class="@(current ? "step current" : "step")">@stepText</li>
+            }
+        </ol>
+    </section>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    Recipe? recipe;
+    int stepIndex;
+    bool listening;
+    string? lastHeard;
+    string? errorText;
+
+    DotNetObjectReference<RecipeDetail>? selfRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        recipe = await Recipes.GetAsync(Id, CancellationToken.None);
+    }
+
+    async Task ToggleListening()
+    {
+        if (listening)
+        {
+            await StopListening();
+        }
+        else
+        {
+            await StartListening();
+        }
+    }
+
+    async Task StartListening()
+    {
+        if (recipe is null) return;
+        selfRef ??= DotNetObjectReference.Create(this);
+        var ok = await JS.InvokeAsync<bool>("speech.startRecognition", selfRef, "en-US");
+        if (!ok)
+        {
+            errorText = "Speech recognition is not available. Try Chrome or Edge over HTTPS.";
+            return;
+        }
+        listening = true;
+        errorText = null;
+        await Speak(CurrentInstruction());
+    }
+
+    async Task StopListening()
+    {
+        await JS.InvokeVoidAsync("speech.stopRecognition");
+        await JS.InvokeVoidAsync("speech.cancelSpeech");
+        listening = false;
+    }
+
+    async Task Prev()
+    {
+        if (stepIndex > 0) stepIndex--;
+        await Speak(CurrentInstruction());
+    }
+
+    async Task Next()
+    {
+        if (recipe is null) return;
+        if (stepIndex < recipe.Steps.Count - 1) stepIndex++;
+        await Speak(CurrentInstruction());
+    }
+
+    Task Repeat() => Speak(CurrentInstruction());
+
+    string CurrentInstruction()
+    {
+        if (recipe is null || recipe.Steps.Count == 0) return "";
+        return $"Step {stepIndex + 1}. {recipe.Steps[stepIndex].Instruction}";
+    }
+
+    async Task Speak(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        await JS.InvokeVoidAsync("speech.speak", text, "en-US", 1.0);
+    }
+
+    [JSInvokable]
+    public async Task OnSpeechHeard(string transcript)
+    {
+        lastHeard = transcript;
+        var t = transcript.ToLowerInvariant();
+
+        if (Contains(t, "next", "continue", "forward"))
+        {
+            await Next();
+        }
+        else if (Contains(t, "back", "previous", "go back"))
+        {
+            await Prev();
+        }
+        else if (Contains(t, "repeat", "again", "say again", "what was that"))
+        {
+            await Repeat();
+        }
+        else if (Contains(t, "stop", "pause", "quiet", "silence"))
+        {
+            await JS.InvokeVoidAsync("speech.cancelSpeech");
+        }
+        else if (Contains(t, "start over", "restart", "from the top"))
+        {
+            stepIndex = 0;
+            await Speak(CurrentInstruction());
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnSpeechError(string error)
+    {
+        if (error is "not-allowed" or "service-not-allowed")
+        {
+            errorText = "Microphone permission denied.";
+            listening = false;
+        }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnSpeechStopped()
+    {
+        listening = false;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    static bool Contains(string text, params string[] phrases)
+    {
+        foreach (var p in phrases)
+        {
+            if (text.Contains(p, StringComparison.Ordinal)) return true;
+        }
+        return false;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("speech.stopRecognition");
+            await JS.InvokeVoidAsync("speech.cancelSpeech");
+        }
+        catch { /* circuit may already be gone */ }
+        selfRef?.Dispose();
+    }
+}

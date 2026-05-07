@@ -1,0 +1,57 @@
+@page "/bar"
+@rendermode InteractiveServer
+@inject Cocktail.Web.Services.RecipeService Recipes
+
+<PageTitle>Bar</PageTitle>
+
+<h1>Bar inventory</h1>
+
+<form class="add-form" @onsubmit="AddItem" @onsubmit:preventDefault>
+    <input type="text" placeholder="Add ingredient (e.g. Mezcal)" @bind="newItem" />
+    <button type="submit" class="btn primary">Add</button>
+</form>
+
+@if (items is null)
+{
+    <p><em>Loading…</em></p>
+}
+else
+{
+    <ul class="bar-list">
+        @foreach (var item in items)
+        {
+            <li class="@(item.InStock ? "bar-row in-stock" : "bar-row out-stock")"
+                @onclick="() => Toggle(item.Id)">
+                <span class="dot"></span>
+                <span class="name">@item.IngredientName</span>
+                <span class="status">@(item.InStock ? "In stock" : "Out")</span>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    List<Cocktail.Web.Data.BarItem>? items;
+    string newItem = "";
+
+    protected override Task OnInitializedAsync() => Refresh();
+
+    async Task Refresh()
+    {
+        items = await Recipes.GetBarItemsAsync(CancellationToken.None);
+    }
+
+    async Task Toggle(int id)
+    {
+        await Recipes.ToggleBarItemAsync(id, CancellationToken.None);
+        await Refresh();
+    }
+
+    async Task AddItem()
+    {
+        if (string.IsNullOrWhiteSpace(newItem)) return;
+        await Recipes.AddBarItemAsync(newItem, CancellationToken.None);
+        newItem = "";
+        await Refresh();
+    }
+}

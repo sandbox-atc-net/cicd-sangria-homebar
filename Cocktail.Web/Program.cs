@@ -16,6 +16,32 @@ builder.Services.AddScoped<RecipeService>();
 
 var app = builder.Build();
 
+// CLI: `dotnet run -- seed-from-api [--clear] [--max N]`
+if (args.Length > 0 && args[0].Equals("seed-from-api", StringComparison.OrdinalIgnoreCase))
+{
+    var apiKey = builder.Configuration["CocktailDbApi:Key"] ?? "1";
+    var version = builder.Configuration["CocktailDbApi:Version"] ?? "v1";
+    var clear = args.Contains("--clear", StringComparer.OrdinalIgnoreCase);
+    int? max = null;
+    var maxIdx = Array.FindIndex(args, a => a.Equals("--max", StringComparison.OrdinalIgnoreCase));
+    if (maxIdx >= 0 && maxIdx + 1 < args.Length && int.TryParse(args[maxIdx + 1], out var parsed))
+    {
+        max = parsed;
+    }
+
+    using var scope = app.Services.CreateScope();
+    var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<CocktailDb>>();
+    using var db = factory.CreateDbContext();
+    db.Database.EnsureCreated();
+
+    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+    var cocktailApi = new CocktailDbApi(http, apiKey, version);
+    var importer = new CocktailDbImporter(cocktailApi, db);
+    Console.WriteLine($"Importing from TheCocktailDB ({version}, key {apiKey})...");
+    await importer.ImportAlcoholicAsync(max, clear, CancellationToken.None);
+    return;
+}
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);

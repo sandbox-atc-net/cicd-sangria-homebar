@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "QqQaNXozOTI=",
+  "dgSpecHash": "+c0t2zNbR0U=",
   "success": true,
-  "projectFilePath": "C:\\Dev\\CocktailApp\\Cocktail.Web\\Cocktail.Web.csproj",
+  "projectFilePath": "C:\\Dev\\CocktailApp\\cicd-sangria-homebar\\Cocktail.Web\\Cocktail.Web.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\klj\\.nuget\\packages\\humanizer.core\\2.14.1\\humanizer.core.2.14.1.nupkg.sha512",
     "C:\\Users\\klj\\.nuget\\packages\\microsoft.bcl.asyncinterfaces\\7.0.0\\microsoft.bcl.asyncinterfaces.7.0.0.nupkg.sha512",

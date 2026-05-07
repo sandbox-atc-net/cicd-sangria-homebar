@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Dev\\CocktailApp\\Cocktail.Web\\Cocktail.Web.csproj": {}
+    "C:\\Dev\\CocktailApp\\cicd-sangria-homebar\\Cocktail.Web\\Cocktail.Web.csproj": {}
   },
   "projects": {
-    "C:\\Dev\\CocktailApp\\Cocktail.Web\\Cocktail.Web.csproj": {
+    "C:\\Dev\\CocktailApp\\cicd-sangria-homebar\\Cocktail.Web\\Cocktail.Web.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Dev\\CocktailApp\\Cocktail.Web\\Cocktail.Web.csproj",
+        "projectUniqueName": "C:\\Dev\\CocktailApp\\cicd-sangria-homebar\\Cocktail.Web\\Cocktail.Web.csproj",
         "projectName": "Cocktail.Web",
-        "projectPath": "C:\\Dev\\CocktailApp\\Cocktail.Web\\Cocktail.Web.csproj",
+        "projectPath": "C:\\Dev\\CocktailApp\\cicd-sangria-homebar\\Cocktail.Web\\Cocktail.Web.csproj",
         "packagesPath": "C:\\Users\\klj\\.nuget\\packages\\",
-        "outputPath": "C:\\Dev\\CocktailApp\\Cocktail.Web\\obj\\",
+        "outputPath": "C:\\Dev\\CocktailApp\\cicd-sangria-homebar\\Cocktail.Web\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
@@ -54,6 +54,8 @@
           "targetAlias": "net9.0",
           "dependencies": {
             "Microsoft.EntityFrameworkCore.Design": {
+              "include": "Runtime, Build, Native, ContentFiles, Analyzers, BuildTransitive",
+              "suppressParent": "All",
               "target": "Package",
               "version": "[9.0.0, )"
             },

@@ -1,5 +1,6 @@
 @page "/recipe/{Id:int}"
 @rendermode InteractiveServer
+@using Cocktail.Web.Data
 @implements IAsyncDisposable
 @inject Cocktail.Web.Services.RecipeService Recipes
 @inject IJSRuntime JS

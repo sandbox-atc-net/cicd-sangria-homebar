@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "cocktail",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "Cocktail.Web", "--launch-profile", "http"],
+      "port": 5050,
+      "autoPort": false
+    }
+  ]
+}

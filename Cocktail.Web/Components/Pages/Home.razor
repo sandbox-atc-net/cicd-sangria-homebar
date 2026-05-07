@@ -7,6 +7,29 @@
 
 <h1>Cocktails</h1>
 
+@if (results is not null)
+{
+    var ready = results.Count(r => r.MissingIngredients.Count == 0);
+    <div class="ready-banner @(ready > 0 ? "" : "empty")">
+        @if (ready > 0)
+        {
+            <strong>🍸 @ready @(ready == 1 ? "drink" : "drinks") ready to make</strong>
+            @if (!onlyMakeable)
+            {
+                <button class="btn-link" @onclick="() => SetMakeable(true)">Show only these</button>
+            }
+            else
+            {
+                <button class="btn-link" @onclick="() => SetMakeable(false)">Show all recipes</button>
+            }
+        }
+        else
+        {
+            <span>No drinks ready yet — stock more bottles on the <a href="/bar">Bar</a> page or check the <a href="/shopping">Shopping</a> list.</span>
+        }
+    </div>
+}
+
 <div class="toolbar">
     <input type="search"
            placeholder="Search by name or ingredient"
@@ -49,11 +72,17 @@ else
 }
 
 @code {
+    [SupplyParameterFromQuery] public bool Makeable { get; set; }
+
     string query = "";
     bool onlyMakeable;
     List<Cocktail.Web.Services.RecipeListItem>? results;
 
-    protected override Task OnInitializedAsync() => Refresh();
+    protected override Task OnInitializedAsync()
+    {
+        onlyMakeable = Makeable;
+        return Refresh();
+    }
 
     async Task OnQueryChanged(ChangeEventArgs e)
     {
@@ -64,6 +93,12 @@ else
     async Task OnMakeableToggled(ChangeEventArgs e)
     {
         onlyMakeable = e.Value is true;
+        await Refresh();
+    }
+
+    async Task SetMakeable(bool value)
+    {
+        onlyMakeable = value;
         await Refresh();
     }
 

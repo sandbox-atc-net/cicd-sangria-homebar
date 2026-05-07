@@ -1,10 +1,29 @@
 @page "/bar"
 @rendermode InteractiveServer
+@using Cocktail.Web.Services
+@implements IAsyncDisposable
 @inject Cocktail.Web.Services.RecipeService Recipes
+@inject IJSRuntime JS
 
 <PageTitle>Bar</PageTitle>
 
 <h1>Bar inventory</h1>
+
+<div class="step-controls">
+    <button @onclick="ToggleListening" class="@(listening ? "btn primary listening" : "btn primary")">
+        @(listening ? "Stop listening" : "Voice mode")
+    </button>
+    <span class="bar-hint">Try: "add Cocchi Americano", "I have rye whiskey", "out of orange bitters".</span>
+</div>
+
+@if (lastHeard is not null)
+{
+    <div class="heard">Heard: <em>@lastHeard</em>@(string.IsNullOrEmpty(lastAction) ? "" : " — " + lastAction)</div>
+}
+@if (errorText is not null)
+{
+    <div class="error">@errorText</div>
+}
 
 <form class="add-form" @onsubmit="AddItem" @onsubmit:preventDefault>
     <input type="text" placeholder="Add ingredient (e.g. Mezcal)" @bind="newItem" />
@@ -33,6 +52,12 @@ else
 @code {
     List<Cocktail.Web.Data.BarItem>? items;
     string newItem = "";
+    bool listening;
+    string? lastHeard;
+    string? lastAction;
+    string? errorText;
+
+    DotNetObjectReference<Bar>? selfRef;
 
     protected override Task OnInitializedAsync() => Refresh();
 
@@ -53,5 +78,97 @@ else
         await Recipes.AddBarItemAsync(newItem, CancellationToken.None);
         newItem = "";
         await Refresh();
+    }
+
+    async Task ToggleListening()
+    {
+        if (listening) await StopListening();
+        else await StartListening();
+    }
+
+    async Task StartListening()
+    {
+        selfRef ??= DotNetObjectReference.Create(this);
+        var ok = await JS.InvokeAsync<bool>("speech.startRecognition", selfRef, "en-US");
+        if (!ok)
+        {
+            errorText = "Speech recognition is not available. Try Chrome or Edge over HTTPS.";
+            return;
+        }
+        listening = true;
+        errorText = null;
+        await JS.InvokeVoidAsync("speech.speak", "Voice mode on. Say add or remove.", "en-US", 1.0);
+    }
+
+    async Task StopListening()
+    {
+        await JS.InvokeVoidAsync("speech.stopRecognition");
+        await JS.InvokeVoidAsync("speech.cancelSpeech");
+        listening = false;
+    }
+
+    [JSInvokable]
+    public async Task OnSpeechHeard(string transcript)
+    {
+        lastHeard = transcript;
+        lastAction = null;
+        var intent = VoiceParser.Parse(transcript);
+
+        switch (intent)
+        {
+            case AddIngredientIntent add:
+                await Recipes.SetBarItemStockAsync(add.IngredientName, true, CancellationToken.None);
+                lastAction = $"added {add.IngredientName}";
+                await Refresh();
+                await JS.InvokeVoidAsync("speech.speak", $"Added {add.IngredientName}.", "en-US", 1.0);
+                break;
+
+            case RemoveIngredientIntent remove:
+                await Recipes.SetBarItemStockAsync(remove.IngredientName, false, CancellationToken.None);
+                lastAction = $"removed {remove.IngredientName}";
+                await Refresh();
+                await JS.InvokeVoidAsync("speech.speak", $"Removed {remove.IngredientName}.", "en-US", 1.0);
+                break;
+
+            case PauseTtsIntent:
+                await JS.InvokeVoidAsync("speech.cancelSpeech");
+                lastAction = "stopped speaking";
+                break;
+
+            default:
+                lastAction = "no match — try \"add\" or \"remove\"";
+                break;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnSpeechError(string error)
+    {
+        if (error is "not-allowed" or "service-not-allowed")
+        {
+            errorText = "Microphone permission denied.";
+            listening = false;
+        }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnSpeechStopped()
+    {
+        listening = false;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("speech.stopRecognition");
+            await JS.InvokeVoidAsync("speech.cancelSpeech");
+        }
+        catch { /* circuit may already be gone */ }
+        selfRef?.Dispose();
     }
 }

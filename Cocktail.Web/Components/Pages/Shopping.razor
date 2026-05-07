@@ -1,0 +1,63 @@
+@page "/shopping"
+@rendermode InteractiveServer
+@using Cocktail.Web.Services
+@inject Cocktail.Web.Services.RecipeService Recipes
+@inject SubstitutionService Subs
+
+<PageTitle>Shopping list</PageTitle>
+
+<h1>Shopping list</h1>
+<p class="meta">Ingredients you don't have yet, sorted by how many drinks each one would unlock.</p>
+
+@if (items is null)
+{
+    <p><em>Loading…</em></p>
+}
+else if (items.Count == 0)
+{
+    <p>You're fully stocked — every recipe in the book is makeable. 🎉</p>
+}
+else
+{
+    <ul class="shopping-list">
+        @foreach (var item in items)
+        {
+            var subs = Subs.Suggest(item.IngredientName);
+            <li class="shopping-row">
+                <div class="shopping-main">
+                    <div class="shopping-name">@item.IngredientName</div>
+                    <div class="shopping-stats">
+                        @if (item.RecipesUnlockedIfBought > 0)
+                        {
+                            <span class="badge unlock">Unlocks @item.RecipesUnlockedIfBought @(item.RecipesUnlockedIfBought == 1 ? "drink" : "drinks")</span>
+                        }
+                        <span class="badge needed">Needed by @item.RecipesNeedingThis @(item.RecipesNeedingThis == 1 ? "recipe" : "recipes")</span>
+                    </div>
+                    <div class="shopping-samples">e.g. @string.Join(", ", item.SampleRecipes)</div>
+                    @if (subs.Count > 0)
+                    {
+                        <div class="sub-hint">Substitutes: @string.Join(", ", subs)</div>
+                    }
+                </div>
+                <button class="btn primary" @onclick="() => Buy(item.IngredientName)">I bought this</button>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    List<ShoppingListItem>? items;
+
+    protected override Task OnInitializedAsync() => Refresh();
+
+    async Task Refresh()
+    {
+        items = await Recipes.GetShoppingListAsync(CancellationToken.None);
+    }
+
+    async Task Buy(string ingredient)
+    {
+        await Recipes.SetBarItemStockAsync(ingredient, true, CancellationToken.None);
+        await Refresh();
+    }
+}

@@ -1,62 +1,176 @@
 @page "/bar"
 @rendermode InteractiveServer
+@using Cocktail.Web.Data
 @using Cocktail.Web.Services
 @implements IAsyncDisposable
-@inject Cocktail.Web.Services.RecipeService Recipes
+@inject RecipeService Recipes
 @inject IJSRuntime JS
 
-<PageTitle>Bar</PageTitle>
+<PageTitle>Sangria · My Bar</PageTitle>
 
-<h1>Bar inventory</h1>
+<div class="main">
+    <div class="page-head">
+        <div>
+            <h1 class="page-title">Your <em>shelf</em></h1>
+            <div class="page-sub">Tap any bottle to mark it in stock · voice: "add mezcal"</div>
+        </div>
+        <button class="btn @(listening ? "btn-papaya" : "btn-ghost")" type="button" @onclick="ToggleListening">
+            <AppIcon Name="mic" CssClass="" Size="14" />
+            @(listening ? "Listening" : "Voice mode")
+        </button>
+    </div>
 
-<div class="step-controls">
-    <button @onclick="ToggleListening" class="@(listening ? "btn primary listening" : "btn primary")">
-        @(listening ? "Stop listening" : "Voice mode")
-    </button>
-    <span class="bar-hint">Try: "add Cocchi Americano", "I have rye whiskey", "out of orange bitters".</span>
+    @if (lastHeard is not null)
+    {
+        <div class="heard">Heard: <em>@lastHeard</em>@(string.IsNullOrEmpty(lastAction) ? "" : " — " + lastAction)</div>
+    }
+    @if (errorText is not null)
+    {
+        <div class="error">@errorText</div>
+    }
+
+    <div class="stat-row">
+        <div class="bar-stat">
+            <span class="bar-stat-num">@stats.BottlesInStock<span class="small">/@stats.BottlesTotal</span></span>
+            <span class="bar-stat-label">Bottles in stock</span>
+        </div>
+        <div class="bar-stat">
+            <span class="bar-stat-num"><em>@stats.ReadyToMake</em></span>
+            <span class="bar-stat-label">Drinks ready to make</span>
+        </div>
+        <div class="bar-stat">
+            <span class="bar-stat-num">@stats.OneBottleAway</span>
+            <span class="bar-stat-label">One bottle away</span>
+        </div>
+        <div class="bar-stat">
+            <span class="bar-stat-num">12</span>
+            <span class="bar-stat-label">Made this month</span>
+        </div>
+    </div>
+
+    @if (stats.OneBottleAway > 0)
+    {
+        <div class="tip-card" style="grid-template-columns: auto 1fr auto">
+            <div class="tip-icon" style="background: var(--lime); color: var(--jungle)">
+                <AppIcon Name="plus" CssClass="" Size="22" />
+            </div>
+            <div>
+                <h3 class="tip-title">One bottle from @stats.OneBottleAway more drinks</h3>
+                <p class="tip-sub">The shopping list ranks bottles by what they unlock.</p>
+            </div>
+            <a class="btn btn-ghost" href="/shopping">View shopping list <AppIcon Name="arrowright" CssClass="" Size="14" /></a>
+        </div>
+    }
+
+    <form class="toolbar add-form" @onsubmit="AddItem" @onsubmit:preventDefault="true">
+        <div class="search">
+            <AppIcon Name="search" CssClass="" Size="18" />
+            <input type="search" placeholder="Search the shelf…" value="@query" @oninput="OnQueryChanged" />
+        </div>
+        <input class="text-input" placeholder="New bottle (e.g. Mezcal)" @bind="newItem" />
+        <select class="cat-select" @bind="newCategory">
+            @foreach (var cat in CATEGORIES)
+            {
+                <option value="@cat">@cat</option>
+            }
+        </select>
+        <button class="btn btn-papaya" type="submit"><AppIcon Name="plus" CssClass="" Size="14" /> Add bottle</button>
+    </form>
+
+    <div class="filter-row">
+        @foreach (var c in cats)
+        {
+            var id = c;
+            var count = id == "all" ? items.Count : items.Count(i => i.Category == id);
+            <button type="button" class="chip @(filter == id ? "on" : "")" @onclick="() => SetFilter(id)">
+                @(id == "all" ? "Everything" : id) <span style="opacity:0.5; font-size:11px; margin-left:4px">@count</span>
+            </button>
+        }
+    </div>
+
+    @if (filter == "all")
+    {
+        @foreach (var cat in cats.Where(c => c != "all"))
+        {
+            var inCat = items.Where(i => i.Category == cat && Matches(i)).ToList();
+            if (inCat.Count == 0) continue;
+            <div style="margin-bottom: 28px">
+                <div class="section-head">
+                    <h3 class="section-title">@cat</h3>
+                    <span class="section-sub">@inCat.Count(i => i.InStock) of @inCat.Count</span>
+                </div>
+                <div class="shelf">
+                    @foreach (var item in inCat)
+                    {
+                        var iid = item.Id;
+                        <button type="button" class="bottle @(item.InStock ? "have" : "missing")" @onclick="() => Toggle(iid)">
+                            <div class="bottle-check">
+                                @if (item.InStock) { <AppIcon Name="check" CssClass="" Size="11" /> }
+                            </div>
+                            <div>
+                                <div class="bottle-name">@item.IngredientName</div>
+                                <div class="bottle-cat">@item.Category</div>
+                            </div>
+                        </button>
+                    }
+                </div>
+            </div>
+        }
+    }
+    else
+    {
+        <div class="shelf">
+            @foreach (var item in items.Where(i => i.Category == filter && Matches(i)))
+            {
+                var iid = item.Id;
+                <button type="button" class="bottle @(item.InStock ? "have" : "missing")" @onclick="() => Toggle(iid)">
+                    <div class="bottle-check">
+                        @if (item.InStock) { <AppIcon Name="check" CssClass="" Size="11" /> }
+                    </div>
+                    <div>
+                        <div class="bottle-name">@item.IngredientName</div>
+                        <div class="bottle-cat">@item.Category</div>
+                    </div>
+                </button>
+            }
+        </div>
+    }
+
+    @if (ready.Count > 0)
+    {
+        <div class="section-head" style="margin-top: 40px">
+            <h2 class="section-title">Ready to <em>pour</em></h2>
+            <span class="section-sub">@ready.Count drinks · zero shopping</span>
+        </div>
+        <div class="grid">
+            @foreach (var r in ready.Take(8))
+            {
+                <RecipeCard Recipe="r" />
+            }
+        </div>
+    }
 </div>
 
-@if (lastHeard is not null)
-{
-    <div class="heard">Heard: <em>@lastHeard</em>@(string.IsNullOrEmpty(lastAction) ? "" : " — " + lastAction)</div>
-}
-@if (errorText is not null)
-{
-    <div class="error">@errorText</div>
-}
-
-<form class="add-form" @onsubmit="AddItem" @onsubmit:preventDefault>
-    <input type="text" placeholder="Add ingredient (e.g. Mezcal)" @bind="newItem" />
-    <button type="submit" class="btn primary">Add</button>
-</form>
-
-@if (items is null)
-{
-    <p><em>Loading…</em></p>
-}
-else
-{
-    <ul class="bar-list">
-        @foreach (var item in items)
-        {
-            <li class="@(item.InStock ? "bar-row in-stock" : "bar-row out-stock")"
-                @onclick="() => Toggle(item.Id)">
-                <span class="dot"></span>
-                <span class="name">@item.IngredientName</span>
-                <span class="status">@(item.InStock ? "In stock" : "Out")</span>
-            </li>
-        }
-    </ul>
-}
-
 @code {
-    List<Cocktail.Web.Data.BarItem>? items;
+    static readonly string[] CATEGORIES = new[]
+    {
+        "Spirit", "Bitter", "Fortified", "Liqueur", "Bitters", "Syrup", "Mixer", "Fresh", "Other",
+    };
+
+    List<BarItem> items = new();
+    List<string> cats = new() { "all" };
+    List<RecipeListItem> ready = new();
+    BarStats stats = new(0, 0, 0, 0);
+
+    string filter = "all";
+    string query = "";
     string newItem = "";
+    string newCategory = "Spirit";
+
     bool listening;
     string? lastHeard;
     string? lastAction;
     string? errorText;
-
     DotNetObjectReference<Bar>? selfRef;
 
     protected override Task OnInitializedAsync() => Refresh();
@@ -64,7 +178,20 @@ else
     async Task Refresh()
     {
         items = await Recipes.GetBarItemsAsync(CancellationToken.None);
+        cats = new[] { "all" }
+            .Concat(items.Select(i => i.Category).Distinct().OrderBy(c => c))
+            .ToList();
+        stats = await Recipes.GetBarStatsAsync(CancellationToken.None);
+        ready = await Recipes.SearchAsync(new RecipeSearch { OnlyMakeable = true }, CancellationToken.None);
     }
+
+    bool Matches(BarItem i) =>
+        string.IsNullOrEmpty(query)
+        || i.IngredientName.Contains(query, StringComparison.OrdinalIgnoreCase);
+
+    void SetFilter(string id) => filter = id;
+
+    void OnQueryChanged(ChangeEventArgs e) => query = e.Value?.ToString() ?? "";
 
     async Task Toggle(int id)
     {
@@ -75,7 +202,7 @@ else
     async Task AddItem()
     {
         if (string.IsNullOrWhiteSpace(newItem)) return;
-        await Recipes.AddBarItemAsync(newItem, CancellationToken.None);
+        await Recipes.AddBarItemAsync(newItem, newCategory, CancellationToken.None);
         newItem = "";
         await Refresh();
     }

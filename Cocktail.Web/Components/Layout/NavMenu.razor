@@ -1,8 +1,100 @@
-@* Tiny top nav for the single-user tool. *@
+@rendermode InteractiveServer
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IDisposable
 
-<nav class="topnav">
-    <a href="/">Recipes</a>
-    <a href="/?makeable=1">Make now</a>
-    <a href="/shopping">Shopping</a>
-    <a href="/bar">Bar</a>
-</nav>
+<aside class="sidebar">
+    <div class="brand">
+        <div class="brand-mark"></div>
+        <div>
+            <div class="brand-name">Sangria</div>
+            <span class="brand-sub">ci · cd · cocktails</span>
+        </div>
+    </div>
+
+    @foreach (var item in items)
+    {
+        <a class="nav-item @(IsActive(item.Path) ? "active" : "")" href="@item.Path">
+            <AppIcon Name="@item.Icon" />
+            <span>@item.Label</span>
+            @if (item.Tag is not null)
+            {
+                <span class="nav-tag">@item.Tag</span>
+            }
+        </a>
+    }
+
+    <div class="nav-foot">
+        <a class="nav-item" href="/mixer">
+            <AppIcon Name="mic" />
+            <span>Hands-free</span>
+            <span class="nav-tag">NEW</span>
+        </a>
+        <button class="theme-toggle" type="button" @onclick="ToggleTheme">
+            <span style="display:inline-flex;align-items:center;gap:8px">
+                <AppIcon Name="@(theme == "dark" ? "moon" : "sun")" CssClass="" Size="14" />
+                @(theme == "dark" ? "midnight" : "daylight")
+            </span>
+            <span style="font-size:9px;opacity:0.5">⌘D</span>
+        </button>
+    </div>
+</aside>
+
+@code {
+    string theme = "light";
+
+    record NavItem(string Path, string Label, string Icon, string? Tag = null);
+
+    NavItem[] items = new[]
+    {
+        new NavItem("/", "Discover", "home"),
+        new NavItem("/bar", "My Bar", "bar"),
+        new NavItem("/shopping", "Shopping", "cart"),
+        new NavItem("/favorites", "Favorites", "heart"),
+        new NavItem("/log", "Drink log", "history"),
+    };
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var stored = await JS.InvokeAsync<string?>("localStorage.getItem", "sangria.theme");
+            if (!string.IsNullOrEmpty(stored)) theme = stored!;
+            await JS.InvokeVoidAsync("sangria.setTheme", theme);
+            StateHasChanged();
+        }
+        catch { /* localStorage unavailable */ }
+    }
+
+    bool IsActive(string path)
+    {
+        var current = new Uri(Nav.Uri).AbsolutePath.TrimEnd('/');
+        if (path == "/") return string.IsNullOrEmpty(current);
+        return current.StartsWith(path.TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
+    }
+
+    async Task ToggleTheme()
+    {
+        theme = theme == "dark" ? "light" : "dark";
+        try
+        {
+            await JS.InvokeVoidAsync("sangria.setTheme", theme);
+            await JS.InvokeVoidAsync("localStorage.setItem", "sangria.theme", theme);
+        }
+        catch { /* ignore */ }
+    }
+
+    void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

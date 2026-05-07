@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 3,
   "targets": {
     "net9.0": {
       "Humanizer.Core/2.14.1": {
@@ -3079,23 +3079,23 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\klj\\.nuget\\packages\\": {},
+    "C:\\Users\\pko\\.nuget\\packages\\": {},
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Dev\\CocktailApp\\cicd-sangria-homebar\\Cocktail.Web\\Cocktail.Web.csproj",
+      "projectUniqueName": "C:\\Dev\\Code\\3rdParty\\cicd-sangria-homebar\\Cocktail.Web\\Cocktail.Web.csproj",
       "projectName": "Cocktail.Web",
-      "projectPath": "C:\\Dev\\CocktailApp\\cicd-sangria-homebar\\Cocktail.Web\\Cocktail.Web.csproj",
-      "packagesPath": "C:\\Users\\klj\\.nuget\\packages\\",
-      "outputPath": "C:\\Dev\\CocktailApp\\cicd-sangria-homebar\\Cocktail.Web\\obj\\",
+      "projectPath": "C:\\Dev\\Code\\3rdParty\\cicd-sangria-homebar\\Cocktail.Web\\Cocktail.Web.csproj",
+      "packagesPath": "C:\\Users\\pko\\.nuget\\packages\\",
+      "outputPath": "C:\\Dev\\Code\\3rdParty\\cicd-sangria-homebar\\Cocktail.Web\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
       ],
       "configFilePaths": [
-        "C:\\Users\\klj\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Users\\pko\\AppData\\Roaming\\NuGet\\NuGet.Config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
       ],
@@ -3109,7 +3109,6 @@
       },
       "frameworks": {
         "net9.0": {
-          "framework": "net9.0",
           "targetAlias": "net9.0",
           "projectReferences": {}
         }
@@ -3124,11 +3123,10 @@
         "auditLevel": "low",
         "auditMode": "direct"
       },
-      "SdkAnalysisLevel": "10.0.300"
+      "SdkAnalysisLevel": "10.0.200"
     },
     "frameworks": {
       "net9.0": {
-        "framework": "net9.0",
         "targetAlias": "net9.0",
         "dependencies": {
           "Microsoft.EntityFrameworkCore.Design": {
@@ -3161,7 +3159,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.300-preview.0.26177.108/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.203/PortableRuntimeIdentifierGraph.json"
       }
     }
   }

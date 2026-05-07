@@ -1,0 +1,500 @@
+@page "/mixer"
+@page "/mixer/{Id:int}"
+@rendermode InteractiveServer
+@using System.Globalization
+@using System.Text.RegularExpressions
+@using Cocktail.Web.Data
+@using Cocktail.Web.Services
+@implements IAsyncDisposable
+@inject RecipeService Recipes
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Sangria · Mixer</PageTitle>
+
+@if (recipe is null)
+{
+    <div class="main">
+        <div class="page-head">
+            <div>
+                <h1 class="page-title">Pick a <em>recipe</em></h1>
+                <div class="page-sub">Tap any drink to start hands-free mixing.</div>
+            </div>
+        </div>
+        <div class="grid">
+            @foreach (var r in cards)
+            {
+                <RecipeCard Recipe="r" OnSelect="StartFromCard" />
+            }
+        </div>
+    </div>
+}
+else
+{
+    <div class="mixer">
+        <div class="steps-track">
+            @{ var ti = 0; }
+            @foreach (var _ in recipe.Steps)
+            {
+                var cls = ti < stepIdx ? "done" : ti == stepIdx ? "cur" : "";
+                <div class="steps-track-seg @cls"></div>
+                ti++;
+            }
+        </div>
+
+        <div class="mixer-head">
+            <div class="mixer-recipe">
+                <div class="mixer-glass-mini">
+                    <GlassSvg Glass="@recipe.Glass" Liquid="@recipe.ColorHex" Garnish="lime" />
+                </div>
+                <div>
+                    <div class="mixer-recipe-name">@recipe.Name</div>
+                    <div class="mixer-step-count">Step @(stepIdx + 1) of @recipe.Steps.Count · @recipe.Family</div>
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px">
+                @if (wakeMode)
+                {
+                    <span class="wake-pill">Hey, bartender</span>
+                }
+                <button class="mixer-close" type="button" @onclick="Exit">
+                    <AppIcon Name="close" CssClass="" Size="12" /> Exit
+                </button>
+            </div>
+        </div>
+
+        <div class="mixer-body">
+            <aside class="mixer-rail">
+                <div class="batch-row">
+                    <span class="batch-pill">Batch</span>
+                    <div style="font-size: 13px; color: rgba(251,243,227,0.85)">
+                        @(batch == 1 ? "Single drink" : $"Scaled {batch}× · party of {batch}")
+                    </div>
+                    <div class="batch-stepper">
+                        <button type="button" @onclick="() => SetBatch(batch - 1)" disabled="@(batch <= 1)">−</button>
+                        <span class="num">@batch</span>
+                        <button type="button" @onclick="() => SetBatch(batch + 1)" disabled="@(batch >= 12)">+</button>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="rail-h">Ingredients · @recipe.Ingredients.Count</div>
+                    @foreach (var ing in recipe.Ingredients)
+                    {
+                        var subClass = !string.IsNullOrEmpty(ing.Sub) ? "sub" : "";
+                        <div class="ing-row @subClass">
+                            <span class="ing-name">@ing.IngredientName</span>
+                            <span class="ing-amt">@ScaleAmount(ing.Amount, batch)</span>
+                        </div>
+                    }
+                </div>
+
+                @if (CurrentTimer is int t)
+                {
+                    <div class="mixer-timer-card @(timerRunning ? "running" : "")">
+                        <span class="mixer-timer-label">@(timerRunning ? $"{currentStep?.Action ?? "timing"} now" : "ready when you are")</span>
+                        <span class="mixer-timer-display">@FormatTimer()</span>
+                        <div class="mixer-timer-bar">
+                            <div class="mixer-timer-bar-fill" style="width: @(TimerPercent.ToString("0.##", CultureInfo.InvariantCulture))%"></div>
+                        </div>
+                        <button class="btn btn-papaya" type="button" style="margin-top: 6px; justify-content: center" @onclick="ToggleTimer">
+                            @(timerRunning ? "Stop" : $"Start {t}s {currentStep?.Action ?? "timer"}")
+                        </button>
+                    </div>
+                }
+
+                @if (FirstSubstitution is var sub && sub is not null)
+                {
+                    <div class="shake-warn">
+                        <span style="font-size: 18px">↪</span>
+                        <span><strong style="font-style: normal; font-weight: 600">No @sub.IngredientName?</strong> @sub.Sub.</span>
+                    </div>
+                }
+            </aside>
+
+            <section class="mixer-center">
+                <div class="chat" id="mixer-chat">
+                    @foreach (var msg in conversation)
+                    {
+                        <div class="bubble @msg.Who @(msg.Kind ?? "")">
+                            @if (msg.Kind == "step")
+                            {
+                                <span class="step-number">Step @msg.StepNum of @msg.Total</span>
+                            }
+                            @msg.Text
+                            <span class="bubble-meta">@(msg.Who == "bartender" ? "· Sangria" : "· you · " + msg.Time)</span>
+                        </div>
+                    }
+                    @if (listening)
+                    {
+                        <div class="bubble user" style="opacity: 0.5; font-style: italic">
+                            <span style="display: inline-flex; align-items: center; gap: 6px">
+                                <span style="width: 6px; height: 6px; border-radius: 50%; background: #fff; animation: pulse 1s infinite"></span>
+                                listening…
+                            </span>
+                        </div>
+                    }
+                </div>
+
+                <div class="mixer-foot">
+                    <div class="cmd-hints">
+                        <button type="button" class="cmd" @onclick='() => HandleVoice("next")'>next</button>
+                        <button type="button" class="cmd" @onclick='() => HandleVoice("back")'>back</button>
+                        <button type="button" class="cmd" @onclick='() => HandleVoice("repeat")'>repeat</button>
+                        <button type="button" class="cmd" @onclick='() => HandleVoice("start the timer")'>start timer</button>
+                        <button type="button" class="cmd" @onclick='() => HandleVoice("substitute")'>substitute</button>
+                        <button type="button" class="cmd" @onclick="ToggleWake">@(wakeMode ? "wake on" : "wake off")</button>
+                    </div>
+                    <button class="mic @(listening ? "listening" : "")" type="button" @onclick="ToggleListening">
+                        <span class="mic-ring"></span>
+                        <AppIcon Name="mic" CssClass="" Size="22" />
+                    </button>
+                    <div class="mic-state">
+                        <div class="mic-status @(listening ? "" : "idle")">
+                            <span class="dot"></span>
+                            @(listening ? "Listening · say \"next\" to advance" : "Tap mic or say \"Hey, bartender\"")
+                        </div>
+                        <div class="mic-hint">
+                            @(currentStep?.TimerSeconds is int s
+                                ? $"Try \"start the {s} second {currentStep.Action ?? "timer"}\""
+                                : "Try \"what's next\" or \"repeat that\"")
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 8px">
+                        <button type="button" class="cmd" @onclick="StepBack" disabled="@(stepIdx == 0)">← back</button>
+                        <button type="button" class="cmd" @onclick="StepNext" disabled="@(stepIdx >= recipe.Steps.Count - 1)">next →</button>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    Recipe? recipe;
+    List<RecipeListItem> cards = new();
+    int stepIdx;
+    int batch = 1;
+    bool listening;
+    bool wakeMode = true;
+    DateTime? lastWakeAt;
+    private static readonly TimeSpan WakeWindow = TimeSpan.FromSeconds(6);
+
+    // Timer
+    bool timerRunning;
+    DateTime timerStartedAt;
+    int timerTotalSeconds;
+    System.Timers.Timer? ticker;
+
+    // Chat
+    record ChatMsg(string Who, string Text, string? Kind = null, int StepNum = 0, int Total = 0, string Time = "");
+    List<ChatMsg> conversation = new();
+
+    DotNetObjectReference<Mixer>? selfRef;
+
+    RecipeStep? currentStep =>
+        recipe is { Steps: { Count: > 0 } s } && stepIdx >= 0 && stepIdx < s.Count ? s[stepIdx] : null;
+
+    int? CurrentTimer => currentStep?.TimerSeconds;
+
+    RecipeIngredient? FirstSubstitution =>
+        recipe?.Ingredients.FirstOrDefault(i => !string.IsNullOrEmpty(i.Sub));
+
+    double TimerPercent
+    {
+        get
+        {
+            if (CurrentTimer is not int t || t <= 0) return 0;
+            if (!timerRunning) return 0;
+            var elapsed = (DateTime.UtcNow - timerStartedAt).TotalSeconds;
+            var pct = 100 - (elapsed * 100.0 / timerTotalSeconds);
+            return Math.Clamp(pct, 0, 100);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Id is int id)
+        {
+            recipe = await Recipes.GetAsync(id, CancellationToken.None);
+            ResetConversation();
+        }
+        else
+        {
+            cards = await Recipes.SearchAsync(new RecipeSearch(), CancellationToken.None);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try { await JS.InvokeVoidAsync("sangria.scrollToBottom", "mixer-chat"); }
+        catch { }
+    }
+
+    void ResetConversation()
+    {
+        if (recipe is null) return;
+        stepIdx = 0;
+        timerRunning = false;
+        var first = recipe.Steps.FirstOrDefault();
+        conversation = new()
+        {
+            new ChatMsg("bartender", $"Setting up a {recipe.Name}. {recipe.Description}", "tip", Time: NowTime()),
+        };
+        if (first is not null)
+        {
+            conversation.Add(new ChatMsg(
+                "bartender",
+                $"{first.Title}. {first.Instruction}",
+                "step", StepNum: 1, Total: recipe.Steps.Count, Time: NowTime()));
+        }
+    }
+
+    static string NowTime() => DateTime.Now.ToString("HH:mm");
+
+    void StartFromCard(RecipeListItem r)
+        => Nav.NavigateTo($"/mixer/{r.Id}");
+
+    void Exit() => Nav.NavigateTo("/");
+
+    void SetBatch(int n) => batch = Math.Clamp(n, 1, 12);
+
+    void StepBack() => GoToStep(stepIdx - 1);
+    void StepNext() => GoToStep(stepIdx + 1);
+
+    void GoToStep(int idx)
+    {
+        if (recipe is null || idx < 0 || idx >= recipe.Steps.Count) return;
+        stepIdx = idx;
+        var s = recipe.Steps[idx];
+        conversation.Add(new ChatMsg(
+            "bartender", $"{s.Title}. {s.Instruction}",
+            "step", StepNum: idx + 1, Total: recipe.Steps.Count, Time: NowTime()));
+        if (s.TimerSeconds is int t)
+        {
+            conversation.Add(new ChatMsg(
+                "bartender", $"Say \"start the timer\" — I'll count {t} seconds for the {s.Action ?? "timer"}.",
+                "tip", Time: NowTime()));
+        }
+        _ = SpeakAsync($"Step {idx + 1}. {s.Title}. {s.Instruction}");
+    }
+
+    async Task ToggleListening()
+    {
+        if (listening) await StopListening();
+        else await StartListening();
+    }
+
+    async Task StartListening()
+    {
+        selfRef ??= DotNetObjectReference.Create(this);
+        var ok = await JS.InvokeAsync<bool>("speech.startRecognition", selfRef, "en-US");
+        if (!ok)
+        {
+            conversation.Add(new ChatMsg("bartender",
+                "Speech recognition isn't available — tap commands below to step through.",
+                "tip", Time: NowTime()));
+            return;
+        }
+        listening = true;
+        await SpeakAsync(wakeMode
+            ? "Listening for hey bartender."
+            : "I'm listening.");
+    }
+
+    async Task StopListening()
+    {
+        try { await JS.InvokeVoidAsync("speech.stopRecognition"); } catch { }
+        try { await JS.InvokeVoidAsync("speech.cancelSpeech"); } catch { }
+        listening = false;
+        lastWakeAt = null;
+    }
+
+    void ToggleWake() => wakeMode = !wakeMode;
+
+    Task SpeakAsync(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return Task.CompletedTask;
+        try { return JS.InvokeVoidAsync("speech.speak", text, "en-US", 1.0).AsTask(); }
+        catch { return Task.CompletedTask; }
+    }
+
+    [JSInvokable]
+    public async Task OnSpeechHeard(string transcript)
+    {
+        await HandleVoice(transcript);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnSpeechError(string error) => Task.CompletedTask;
+
+    [JSInvokable]
+    public Task OnSpeechStopped()
+    {
+        listening = false;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    async Task HandleVoice(string transcript)
+    {
+        var text = transcript.Trim();
+        if (string.IsNullOrEmpty(text)) return;
+
+        // Echo what was heard.
+        conversation.Add(new ChatMsg("user", text, Time: NowTime()));
+
+        var intent = VoiceParser.Parse(text);
+
+        if (wakeMode)
+        {
+            if (intent is WakeWordIntent)
+            {
+                lastWakeAt = DateTime.UtcNow;
+                await SpeakAsync("Yes?");
+                return;
+            }
+            // If wake mode on but not yet armed, drop unrelated commands.
+            if (lastWakeAt is null || DateTime.UtcNow - lastWakeAt.Value > WakeWindow)
+            {
+                // Allow obvious explicit commands directly to still work.
+                if (intent is not (NextStepIntent or PrevStepIntent or RepeatIntent
+                                   or StartTimerIntent or PauseTtsIntent or StartOverIntent))
+                {
+                    return;
+                }
+            }
+        }
+
+        switch (intent)
+        {
+            case NextStepIntent:
+                StepNext();
+                break;
+            case PrevStepIntent:
+                StepBack();
+                break;
+            case RepeatIntent:
+                if (currentStep is { } cs)
+                {
+                    conversation.Add(new ChatMsg(
+                        "bartender", $"{cs.Title}. {cs.Instruction}",
+                        "step", StepNum: stepIdx + 1, Total: recipe!.Steps.Count, Time: NowTime()));
+                    await SpeakAsync($"{cs.Title}. {cs.Instruction}");
+                }
+                break;
+            case PauseTtsIntent:
+                try { await JS.InvokeVoidAsync("speech.cancelSpeech"); } catch { }
+                break;
+            case StartOverIntent:
+                ResetConversation();
+                break;
+            case StartTimerIntent st:
+                StartTimer((int)st.Duration.TotalSeconds);
+                break;
+            case CancelTimerIntent:
+                StopTimer();
+                break;
+            default:
+                if (text.Contains("substitut", StringComparison.OrdinalIgnoreCase) && FirstSubstitution is { } s)
+                {
+                    conversation.Add(new ChatMsg("bartender",
+                        $"For {s.IngredientName} — {s.Sub}.",
+                        "tip", Time: NowTime()));
+                    await SpeakAsync($"For {s.IngredientName}, try {s.Sub}.");
+                }
+                else if (text.Contains("timer", StringComparison.OrdinalIgnoreCase) && CurrentTimer is int ts)
+                {
+                    StartTimer(ts);
+                }
+                break;
+        }
+    }
+
+    void ToggleTimer()
+    {
+        if (timerRunning) StopTimer();
+        else if (CurrentTimer is int s) StartTimer(s);
+    }
+
+    void StartTimer(int seconds)
+    {
+        if (seconds <= 0 || recipe is null) return;
+        timerTotalSeconds = seconds;
+        timerStartedAt = DateTime.UtcNow;
+        timerRunning = true;
+        ticker?.Stop();
+        ticker = new System.Timers.Timer(120) { AutoReset = true };
+        ticker.Elapsed += async (_, _) =>
+        {
+            var elapsed = (DateTime.UtcNow - timerStartedAt).TotalSeconds;
+            if (elapsed >= timerTotalSeconds)
+            {
+                timerRunning = false;
+                ticker?.Stop();
+                try { await JS.InvokeVoidAsync("speech.playClink"); } catch { }
+                conversation.Add(new ChatMsg("bartender",
+                    $"Done — that's {timerTotalSeconds} seconds. You can stop now.",
+                    "tip", Time: NowTime()));
+                await SpeakAsync("Time's up.");
+            }
+            await InvokeAsync(StateHasChanged);
+        };
+        ticker.Start();
+        var step = currentStep;
+        var hint = step?.Action == "shake" ? "Shake it like you mean it."
+                : step?.Action == "stir" ? "Long, smooth stirs."
+                : step?.Action == "blend" ? "Hold steady."
+                : "";
+        conversation.Add(new ChatMsg("bartender",
+            $"Timer started — {seconds} seconds. {hint}",
+            "tip", Time: NowTime()));
+    }
+
+    void StopTimer()
+    {
+        timerRunning = false;
+        ticker?.Stop();
+    }
+
+    string FormatTimer()
+    {
+        if (CurrentTimer is not int total || total <= 0) return "0:00";
+        var elapsed = timerRunning ? (DateTime.UtcNow - timerStartedAt).TotalSeconds : 0;
+        var left = (int)Math.Ceiling(timerRunning ? Math.Max(0, total - elapsed) : total);
+        return $"0:{left:00}";
+    }
+
+    static string ScaleAmount(string amount, int scale)
+    {
+        if (scale == 1) return amount;
+        var m = Regex.Match(amount.Trim(), @"^(?<n>[\d./]+)\s*(?<rest>.*)$");
+        if (!m.Success) return amount;
+        var num = m.Groups["n"].Value;
+        double value;
+        if (num.Contains('/'))
+        {
+            var parts = num.Split('/');
+            if (parts.Length != 2 || !double.TryParse(parts[0], NumberStyles.Number, CultureInfo.InvariantCulture, out var a)
+                || !double.TryParse(parts[1], NumberStyles.Number, CultureInfo.InvariantCulture, out var b) || b == 0) return amount;
+            value = a / b;
+        }
+        else if (!double.TryParse(num, NumberStyles.Number, CultureInfo.InvariantCulture, out value))
+        {
+            return amount;
+        }
+        var scaled = Math.Round(value * scale * 4) / 4;
+        return $"{scaled.ToString("0.##", CultureInfo.InvariantCulture)} {m.Groups["rest"].Value}".Trim();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        ticker?.Stop();
+        ticker?.Dispose();
+        try { await JS.InvokeVoidAsync("speech.stopRecognition"); } catch { }
+        try { await JS.InvokeVoidAsync("speech.cancelSpeech"); } catch { }
+        selfRef?.Dispose();
+    }
+}

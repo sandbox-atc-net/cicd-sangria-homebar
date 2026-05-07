@@ -8,7 +8,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-var dbPath = Path.Combine(builder.Environment.ContentRootPath, "cocktail.db");
+// v2 db filename — Sangria schema adds glass/tint/family/taste columns; old cocktail.db is incompatible.
+var dbPath = Path.Combine(builder.Environment.ContentRootPath, "cocktail.v2.db");
 builder.Services.AddDbContextFactory<CocktailDb>(opt =>
     opt.UseSqlite($"Data Source={dbPath}"));
 

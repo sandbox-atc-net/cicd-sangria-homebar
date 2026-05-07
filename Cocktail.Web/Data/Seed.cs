@@ -38,23 +38,54 @@ public static class Seed
                 Method = sr.Method,
                 Garnish = sr.Garnish,
                 Notes = sr.Notes,
+                Glass = sr.Glass,
+                Tint = sr.Tint,
+                Family = sr.Family,
+                Abv = sr.Abv,
+                TimeMinutes = sr.TimeMinutes,
+                Difficulty = sr.Difficulty,
+                Description = sr.Description,
+                Tip = sr.Tip,
+                ColorHex = sr.ColorHex,
+                Palette = sr.Palette,
+                TagsCsv = string.Join(",", sr.Tags ?? new List<string>()),
+                TasteSweet = sr.Taste?.Sweet ?? 0,
+                TasteSour = sr.Taste?.Sour ?? 0,
+                TasteBitter = sr.Taste?.Bitter ?? 0,
+                TasteSpicy = sr.Taste?.Spicy ?? 0,
+                TasteStrong = sr.Taste?.Strong ?? 0,
+                TasteRefreshing = sr.Taste?.Refreshing ?? 0,
                 Ingredients = sr.Ingredients
                     .Select(i => new RecipeIngredient
                     {
                         IngredientName = i.Name,
                         Amount = i.Amount,
                         Order = i.Order,
+                        Sub = i.Sub,
+                        IsGarnish = i.IsGarnish,
                     })
                     .ToList(),
                 Steps = sr.Steps
-                    .Select(s => new RecipeStep { Order = s.Order, Instruction = s.Instruction })
+                    .Select(s => new RecipeStep
+                    {
+                        Order = s.Order,
+                        Instruction = s.Instruction,
+                        Title = s.Title ?? "",
+                        TimerSeconds = s.TimerSeconds,
+                        Action = s.Action,
+                    })
                     .ToList(),
             });
         }
 
         foreach (var bi in data.BarItems)
         {
-            db.BarItems.Add(new BarItem { IngredientName = bi.Name, InStock = bi.InStock });
+            db.BarItems.Add(new BarItem
+            {
+                IngredientName = bi.Name,
+                InStock = bi.InStock,
+                Category = bi.Category ?? "Other",
+            });
         }
 
         db.SaveChanges();
@@ -80,17 +111,56 @@ public static class Seed
                 Method = r.Method,
                 Garnish = r.Garnish,
                 Notes = r.Notes,
+                Glass = r.Glass,
+                Tint = r.Tint,
+                Family = r.Family,
+                Abv = r.Abv,
+                TimeMinutes = r.TimeMinutes,
+                Difficulty = r.Difficulty,
+                Description = r.Description,
+                Tip = r.Tip,
+                ColorHex = r.ColorHex,
+                Palette = r.Palette,
+                Tags = r.Tags.ToList(),
+                Taste = new SeedTaste
+                {
+                    Sweet = r.TasteSweet,
+                    Sour = r.TasteSour,
+                    Bitter = r.TasteBitter,
+                    Spicy = r.TasteSpicy,
+                    Strong = r.TasteStrong,
+                    Refreshing = r.TasteRefreshing,
+                },
                 Ingredients = r.Ingredients
                     .OrderBy(i => i.Order)
-                    .Select(i => new SeedIngredient { Name = i.IngredientName, Amount = i.Amount, Order = i.Order })
+                    .Select(i => new SeedIngredient
+                    {
+                        Name = i.IngredientName,
+                        Amount = i.Amount,
+                        Order = i.Order,
+                        Sub = i.Sub,
+                        IsGarnish = i.IsGarnish,
+                    })
                     .ToList(),
                 Steps = r.Steps
                     .OrderBy(s => s.Order)
-                    .Select(s => new SeedStep { Order = s.Order, Instruction = s.Instruction })
+                    .Select(s => new SeedStep
+                    {
+                        Order = s.Order,
+                        Title = s.Title,
+                        Instruction = s.Instruction,
+                        TimerSeconds = s.TimerSeconds,
+                        Action = s.Action,
+                    })
                     .ToList(),
             }).ToList(),
             BarItems = barItems
-                .Select(b => new SeedBarItem { Name = b.IngredientName, InStock = b.InStock })
+                .Select(b => new SeedBarItem
+                {
+                    Name = b.IngredientName,
+                    InStock = b.InStock,
+                    Category = b.Category,
+                })
                 .ToList(),
         };
 
@@ -115,8 +185,30 @@ public class SeedRecipe
     public string Method { get; set; } = "";
     public string? Garnish { get; set; }
     public string? Notes { get; set; }
+    public string Glass { get; set; } = "rocks";
+    public string Tint { get; set; } = "papaya";
+    public string Family { get; set; } = "Stirred";
+    public string Abv { get; set; } = "Medium";
+    public int TimeMinutes { get; set; } = 3;
+    public string Difficulty { get; set; } = "Easy";
+    public string Description { get; set; } = "";
+    public string? Tip { get; set; }
+    public string ColorHex { get; set; } = "#ff6b3d";
+    public string Palette { get; set; } = "#ff6b3d";
+    public List<string> Tags { get; set; } = new();
+    public SeedTaste? Taste { get; set; }
     public List<SeedIngredient> Ingredients { get; set; } = new();
     public List<SeedStep> Steps { get; set; } = new();
+}
+
+public class SeedTaste
+{
+    public int Sweet { get; set; }
+    public int Sour { get; set; }
+    public int Bitter { get; set; }
+    public int Spicy { get; set; }
+    public int Strong { get; set; }
+    public int Refreshing { get; set; }
 }
 
 public class SeedIngredient
@@ -124,16 +216,22 @@ public class SeedIngredient
     public string Name { get; set; } = "";
     public string Amount { get; set; } = "";
     public int Order { get; set; }
+    public string? Sub { get; set; }
+    public bool IsGarnish { get; set; }
 }
 
 public class SeedStep
 {
     public int Order { get; set; }
+    public string? Title { get; set; }
     public string Instruction { get; set; } = "";
+    public int? TimerSeconds { get; set; }
+    public string? Action { get; set; }
 }
 
 public class SeedBarItem
 {
     public string Name { get; set; } = "";
     public bool InStock { get; set; }
+    public string? Category { get; set; }
 }

@@ -1,0 +1,69 @@
+@using Cocktail.Web.Services
+@inject NavigationManager Nav
+
+<a class="card" href="@Href" @onclick="OnClick" @onclick:preventDefault="@HasOnClick">
+    <div class="card-art tint-@Recipe.Tint">
+        <span class="deco-flag">@Recipe.Family</span>
+        @if (Recipe.MissingIngredients.Count == 0)
+        {
+            <span class="card-badge"><span class="badge-dot"></span>ready</span>
+        }
+        <div class="card-art-inner">
+            <GlassSvg Glass="@Recipe.Glass" Liquid="@Recipe.ColorHex" Garnish="@PickGarnish()" />
+        </div>
+    </div>
+    <div class="card-body">
+        <h3 class="card-name">@Recipe.Name</h3>
+        <div class="card-meta">
+            <span>@Recipe.Abv ABV</span><span class="dot"></span>
+            <span>@Recipe.TimeMinutes m</span><span class="dot"></span>
+            <span>@Recipe.Difficulty</span>
+        </div>
+        <div class="card-row-mid">
+            <div class="dominant">mostly @Recipe.Taste.Dominant()</div>
+            <TasteSparkline Taste="@Recipe.Taste" Compact="true" />
+        </div>
+        <div class="card-tags">
+            @foreach (var tag in Recipe.Tags.Take(2))
+            {
+                <span class="tag">@tag</span>
+            }
+            @if (Recipe.MissingIngredients.Count == 0)
+            {
+                <span class="tag ready">ready to make</span>
+            }
+            else
+            {
+                <span class="tag missing">missing @Recipe.MissingIngredients.Count</span>
+            }
+        </div>
+    </div>
+</a>
+
+@code {
+    [Parameter, EditorRequired] public RecipeListItem Recipe { get; set; } = default!;
+    [Parameter] public EventCallback<RecipeListItem> OnSelect { get; set; }
+
+    bool HasOnClick => OnSelect.HasDelegate;
+    string Href => $"/recipe/{Recipe.Id}";
+
+    async Task OnClick(MouseEventArgs _)
+    {
+        if (OnSelect.HasDelegate)
+        {
+            await OnSelect.InvokeAsync(Recipe);
+            return;
+        }
+        Nav.NavigateTo(Href);
+    }
+
+    string PickGarnish() => Recipe.Glass switch
+    {
+        "rocks" => "orange",
+        "tiki" => "flower",
+        "highball" => "lime",
+        "hurricane" => "flower",
+        "marg" => "lime",
+        _ => "lime",
+    };
+}

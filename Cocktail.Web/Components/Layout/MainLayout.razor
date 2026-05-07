@@ -1,10 +1,22 @@
 @inherits LayoutComponentBase
+@inject NavigationManager Nav
 
-<NavMenu />
+@{
+    var path = new Uri(Nav.Uri).AbsolutePath;
+    var isMixer = path.StartsWith("/mixer", StringComparison.OrdinalIgnoreCase);
+}
 
-<main class="content">
+@if (isMixer)
+{
     @Body
-</main>
+}
+else
+{
+    <div class="app">
+        <NavMenu />
+        @Body
+    </div>
+}
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.

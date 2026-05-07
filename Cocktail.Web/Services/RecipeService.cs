@@ -13,9 +13,9 @@ public class RecipeService
     }
 
     public Task<List<RecipeListItem>> SearchAsync(string? query, bool onlyMakeable, CancellationToken ct)
-        => SearchAsync(new SearchCriteria(Query: query, OnlyMakeable: onlyMakeable), ct);
+        => SearchAsync(new RecipeSearch { Query = query, OnlyMakeable = onlyMakeable }, ct);
 
-    public async Task<List<RecipeListItem>> SearchAsync(SearchCriteria criteria, CancellationToken ct)
+    public async Task<List<RecipeListItem>> SearchAsync(RecipeSearch criteria, CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
 
@@ -31,193 +31,57 @@ public class RecipeService
             .ToListAsync(ct);
         var stockSet = stockNames.ToHashSet();
 
-        var hits = ApplyFilters(recipes, criteria, stockSet).ToList();
-        return hits;
-    }
+        var q = (criteria.Query ?? "").Trim();
+        var tasteSet = (criteria.Tastes ?? new List<string>())
+            .Select(t => t.ToLowerInvariant())
+            .ToHashSet();
+        var familyFilter = (criteria.Family ?? "").Trim().ToLowerInvariant();
 
-    public async Task<RecipeListItem?> GetSurpriseAsync(SearchCriteria criteria, CancellationToken ct)
-    {
-        var matches = await SearchAsync(criteria, ct);
-        if (matches.Count == 0) return null;
-
-        // Use a per-call RNG so concurrent picks don't collide.
-        var rng = Random.Shared;
-        return matches[rng.Next(matches.Count)];
-    }
-
-    public async Task<List<RecipeVariation>> GetVariationsAsync(int recipeId, int max, CancellationToken ct)
-    {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-
-        var anchor = await db.Recipes
-            .Include(r => r.Ingredients)
-            .Include(r => r.Steps)
-            .FirstOrDefaultAsync(r => r.Id == recipeId, ct);
-        if (anchor is null) return new List<RecipeVariation>();
-
-        var others = await db.Recipes
-            .Include(r => r.Ingredients)
-            .Include(r => r.Steps)
-            .Where(r => r.Id != recipeId)
-            .ToListAsync(ct);
-
-        return others
-            .Select(r => new
+        var hits = recipes
+            .Where(r =>
             {
-                Recipe = r,
-                Score = RecipeFacets.Similarity(anchor, r),
-            })
-            .Where(x => x.Score >= 0.34)
-            .OrderByDescending(x => x.Score)
-            .ThenBy(x => x.Recipe.Name)
-            .Take(max)
-            .Select(x => new RecipeVariation(
-                x.Recipe.Id,
-                x.Recipe.Name,
-                x.Recipe.Glassware,
-                x.Recipe.Method,
-                Math.Round(x.Score, 2),
-                SharedIngredients(anchor, x.Recipe),
-                NewIngredients(anchor, x.Recipe)))
-            .ToList();
-    }
-
-    public async Task<RecipeFacetsSummary> GetFacetsSummaryAsync(CancellationToken ct)
-    {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var recipes = await db.Recipes.AsNoTracking().ToListAsync(ct);
-
-        var glassware = recipes
-            .Select(r => RecipeFacets.CanonicalGlass(r.Glassware))
-            .Where(g => !string.IsNullOrEmpty(g))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(g => g, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var methods = recipes
-            .Select(r => r.Method.Trim())
-            .Where(m => !string.IsNullOrEmpty(m))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(m => m, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        return new RecipeFacetsSummary(glassware, methods);
-    }
-
-    private static IEnumerable<RecipeListItem> ApplyFilters(
-        IReadOnlyList<Recipe> recipes,
-        SearchCriteria criteria,
-        HashSet<string> stockSet)
-    {
-        var nameQuery = (criteria.Query ?? "").Trim();
-        var explicitIngredients = (criteria.Ingredients ?? Array.Empty<string>())
-            .Select(i => i.Trim().ToLowerInvariant())
-            .Where(i => i.Length > 0)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        // If the free-text query reads like "rye and Campari" / "rye, lime", treat it as a
-        // multi-ingredient AND-search instead of a single substring match.
-        var derivedIngredients = explicitIngredients.Count == 0
-            ? RecipeFacets.ParseIngredientList(nameQuery)
-            : Array.Empty<string>();
-        var ingredientFilter = explicitIngredients.Count > 0
-            ? explicitIngredients
-            : derivedIngredients.Count > 1 ? derivedIngredients : Array.Empty<string>();
-
-        // When we've redirected the query to multi-ingredient mode, drop it as a name match.
-        var effectiveNameQuery = ingredientFilter.Count > 0 ? "" : nameQuery;
-
-        var glass = RecipeFacets.CanonicalGlass(criteria.Glassware);
-        var method = (criteria.Method ?? "").Trim();
-        var styles = (criteria.Styles ?? Array.Empty<string>())
-            .Select(s => s.Trim()).Where(s => s.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var techniques = criteria.Techniques ?? Array.Empty<Technique>();
-
-        foreach (var r in recipes)
-        {
-            // Name / single-substring text query (only when not interpreting as ingredients).
-            if (!string.IsNullOrEmpty(effectiveNameQuery)
-                && !r.Name.Contains(effectiveNameQuery, StringComparison.OrdinalIgnoreCase)
-                && !r.Ingredients.Any(i => i.IngredientName.Contains(effectiveNameQuery, StringComparison.OrdinalIgnoreCase)))
-            {
-                continue;
-            }
-
-            // Multi-ingredient AND match.
-            if (ingredientFilter.Count > 0)
-            {
-                var ingredientNames = r.Ingredients
-                    .Select(i => i.IngredientName.ToLowerInvariant())
-                    .ToList();
-                if (!ingredientFilter.All(needle => ingredientNames.Any(n => n.Contains(needle))))
+                if (!string.IsNullOrEmpty(q))
                 {
-                    continue;
+                    var matches = r.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+                        || r.Ingredients.Any(i => i.IngredientName.Contains(q, StringComparison.OrdinalIgnoreCase));
+                    if (!matches) return false;
                 }
-            }
-
-            // Glassware (canonicalised, case-insensitive).
-            if (!string.IsNullOrEmpty(glass)
-                && !string.Equals(RecipeFacets.CanonicalGlass(r.Glassware), glass, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            // Method (source-DB category — exact match after trim).
-            if (!string.IsNullOrEmpty(method)
-                && !string.Equals(r.Method.Trim(), method, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            // Technique (derived from steps).
-            if (techniques.Count > 0)
-            {
-                var t = RecipeFacets.Technique(r);
-                if (!techniques.Contains(t)) continue;
-            }
-
-            // Prep-time bucket.
-            if (criteria.PrepTime is { } prep && RecipeFacets.PrepTime(r) != prep) continue;
-
-            // Difficulty bucket.
-            if (criteria.Difficulty is { } diff && RecipeFacets.Difficulty(r) != diff) continue;
-
-            // Style/flavor (any-of: recipe must hit at least one of the requested styles).
-            if (styles.Count > 0)
-            {
-                var tags = RecipeFacets.Tags(r);
-                if (!styles.Any(s => tags.Contains(s, StringComparer.OrdinalIgnoreCase))) continue;
-            }
-
-            var missing = r.Ingredients
-                .Where(i => !stockSet.Contains(i.IngredientName.ToLower()))
-                .Select(i => i.IngredientName)
-                .ToList();
-
-            if (criteria.OnlyMakeable && missing.Count > 0) continue;
-
-            yield return new RecipeListItem(r.Id, r.Name, r.Glassware, r.Method, missing);
-        }
-    }
-
-    private static List<string> SharedIngredients(Recipe a, Recipe b)
-    {
-        var aSet = a.Ingredients.Select(i => RecipeFacets.Normalise(i.IngredientName)).ToHashSet();
-        return b.Ingredients
-            .Where(i => aSet.Contains(RecipeFacets.Normalise(i.IngredientName)))
-            .Select(i => i.IngredientName)
+                if (!string.IsNullOrEmpty(familyFilter) && familyFilter != "all")
+                {
+                    var hay = (r.TagsCsv + "," + r.Family).ToLowerInvariant();
+                    if (!hay.Contains(familyFilter)) return false;
+                }
+                if (tasteSet.Count > 0)
+                {
+                    foreach (var t in tasteSet)
+                    {
+                        var v = t switch
+                        {
+                            "sweet" => r.TasteSweet,
+                            "sour" => r.TasteSour,
+                            "bitter" => r.TasteBitter,
+                            "spicy" => r.TasteSpicy,
+                            "strong" => r.TasteStrong,
+                            "refreshing" => r.TasteRefreshing,
+                            _ => 0,
+                        };
+                        if (v < 3) return false;
+                    }
+                }
+                if (!string.IsNullOrEmpty(criteria.ColorFamily))
+                {
+                    var fam = ColorFamilies.FirstOrDefault(f => f.Id == criteria.ColorFamily);
+                    if (fam is null) return false;
+                    var palette = string.IsNullOrEmpty(r.Palette) ? r.ColorHex : r.Palette;
+                    if (!fam.Match.Contains(palette, StringComparer.OrdinalIgnoreCase)) return false;
+                }
+                return true;
+            })
+            .Select(r => Project(r, stockSet))
+            .Where(r => !criteria.OnlyMakeable || r.MissingIngredients.Count == 0)
             .ToList();
-    }
 
-    private static List<string> NewIngredients(Recipe anchor, Recipe variant)
-    {
-        var anchorSet = anchor.Ingredients.Select(i => RecipeFacets.Normalise(i.IngredientName)).ToHashSet();
-        return variant.Ingredients
-            .Where(i => !anchorSet.Contains(RecipeFacets.Normalise(i.IngredientName)))
-            .Select(i => i.IngredientName)
-            .ToList();
+        return hits;
     }
 
     public async Task<Recipe?> GetAsync(int id, CancellationToken ct)
@@ -232,7 +96,7 @@ public class RecipeService
     public async Task<List<BarItem>> GetBarItemsAsync(CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        return await db.BarItems.OrderBy(b => b.IngredientName).ToListAsync(ct);
+        return await db.BarItems.OrderBy(b => b.Category).ThenBy(b => b.IngredientName).ToListAsync(ct);
     }
 
     public async Task ToggleBarItemAsync(int id, CancellationToken ct)
@@ -247,7 +111,13 @@ public class RecipeService
     public Task AddBarItemAsync(string ingredientName, CancellationToken ct)
         => SetBarItemStockAsync(ingredientName, true, ct);
 
-    public async Task SetBarItemStockAsync(string ingredientName, bool inStock, CancellationToken ct)
+    public Task AddBarItemAsync(string ingredientName, string? category, CancellationToken ct)
+        => SetBarItemStockAsync(ingredientName, true, category, ct);
+
+    public Task SetBarItemStockAsync(string ingredientName, bool inStock, CancellationToken ct)
+        => SetBarItemStockAsync(ingredientName, inStock, null, ct);
+
+    public async Task SetBarItemStockAsync(string ingredientName, bool inStock, string? category, CancellationToken ct)
     {
         var name = (ingredientName ?? "").Trim();
         if (string.IsNullOrEmpty(name)) return;
@@ -258,10 +128,16 @@ public class RecipeService
         if (existing is not null)
         {
             existing.InStock = inStock;
+            if (!string.IsNullOrWhiteSpace(category)) existing.Category = category!;
         }
         else if (inStock)
         {
-            db.BarItems.Add(new BarItem { IngredientName = name, InStock = true });
+            db.BarItems.Add(new BarItem
+            {
+                IngredientName = name,
+                InStock = true,
+                Category = string.IsNullOrWhiteSpace(category) ? "Other" : category!,
+            });
         }
         await db.SaveChangesAsync(ct);
     }
@@ -274,6 +150,30 @@ public class RecipeService
             .Select(b => b.IngredientName.ToLower())
             .ToListAsync(ct);
         return names.ToHashSet();
+    }
+
+    public async Task<BarStats> GetBarStatsAsync(CancellationToken ct)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var bottles = await db.BarItems.ToListAsync(ct);
+        var recipes = await db.Recipes.Include(r => r.Ingredients).ToListAsync(ct);
+
+        var stockSet = bottles.Where(b => b.InStock)
+            .Select(b => b.IngredientName.ToLowerInvariant())
+            .ToHashSet();
+
+        int Missing(Recipe r) => r.Ingredients
+            .Where(i => !i.IsGarnish)
+            .Count(i => !stockSet.Contains(i.IngredientName.ToLowerInvariant()));
+
+        var ready = recipes.Count(r => Missing(r) == 0);
+        var oneAway = recipes.Count(r => Missing(r) == 1);
+
+        return new BarStats(
+            BottlesInStock: bottles.Count(b => b.InStock),
+            BottlesTotal: bottles.Count,
+            ReadyToMake: ready,
+            OneBottleAway: oneAway);
     }
 
     public async Task<List<ShoppingListItem>> GetShoppingListAsync(CancellationToken ct)
@@ -295,6 +195,7 @@ public class RecipeService
         foreach (var recipe in recipes)
         {
             var missing = recipe.Ingredients
+                .Where(i => !i.IsGarnish)
                 .Select(i => i.IngredientName)
                 .Where(n => !stockSet.Contains(n.ToLower()))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -340,9 +241,90 @@ public class RecipeService
         public List<string> UnlockSamples { get; } = new();
         public List<string> AnySamples { get; } = new();
     }
+
+    private static RecipeListItem Project(Recipe r, HashSet<string> stockSet)
+    {
+        var missing = r.Ingredients
+            .Where(i => !i.IsGarnish && !stockSet.Contains(i.IngredientName.ToLowerInvariant()))
+            .Select(i => i.IngredientName)
+            .ToList();
+        var taste = new TasteProfile(
+            r.TasteSweet, r.TasteSour, r.TasteBitter,
+            r.TasteSpicy, r.TasteStrong, r.TasteRefreshing);
+        return new RecipeListItem(
+            Id: r.Id,
+            Name: r.Name,
+            Glassware: r.Glassware,
+            Method: r.Method,
+            Glass: r.Glass,
+            Tint: r.Tint,
+            Family: r.Family,
+            Abv: r.Abv,
+            TimeMinutes: r.TimeMinutes,
+            Difficulty: r.Difficulty,
+            ColorHex: r.ColorHex,
+            Palette: string.IsNullOrEmpty(r.Palette) ? r.ColorHex : r.Palette,
+            Description: r.Description,
+            Tags: r.Tags.ToList(),
+            Taste: taste,
+            MissingIngredients: missing);
+    }
+
+    public static readonly IReadOnlyList<ColorFamily> ColorFamilies = new[]
+    {
+        new ColorFamily("amber",   "Amber",   "linear-gradient(135deg, #ffb347, #a86b2c)", new[]{"#a0521b","#a86b2c","#ffb347"}),
+        new ColorFamily("red",     "Ruby",    "linear-gradient(135deg, #ff2d6f, #6b1d2e)", new[]{"#c8264a","#ff8a9a"}),
+        new ColorFamily("green",   "Verdant", "linear-gradient(135deg, #c7e84f, #1f6b4a)", new[]{"#c7e84f"}),
+        new ColorFamily("pale",    "Pale",    "linear-gradient(135deg, #fff5d6, #ffd980)", new[]{"#fff5d6","#f5e8c8","#ffd980"}),
+        new ColorFamily("pink",    "Pink",    "linear-gradient(135deg, #ff8a9a, #ff2d6f)", new[]{"#ff8a9a"}),
+    };
 }
 
-public record RecipeListItem(int Id, string Name, string Glassware, string Method, List<string> MissingIngredients);
+public record RecipeSearch
+{
+    public string? Query { get; init; }
+    public bool OnlyMakeable { get; init; }
+    public List<string>? Tastes { get; init; }
+    public string? ColorFamily { get; init; }
+    public string? Family { get; init; }
+}
+
+public record TasteProfile(int Sweet, int Sour, int Bitter, int Spicy, int Strong, int Refreshing)
+{
+    public IEnumerable<(string Key, int Value)> Pairs()
+    {
+        yield return ("sweet", Sweet);
+        yield return ("sour", Sour);
+        yield return ("bitter", Bitter);
+        yield return ("spicy", Spicy);
+        yield return ("strong", Strong);
+        yield return ("refreshing", Refreshing);
+    }
+
+    public string Dominant() => Pairs().OrderByDescending(p => p.Value).First().Key;
+}
+
+public record RecipeListItem(
+    int Id,
+    string Name,
+    string Glassware,
+    string Method,
+    string Glass,
+    string Tint,
+    string Family,
+    string Abv,
+    int TimeMinutes,
+    string Difficulty,
+    string ColorHex,
+    string Palette,
+    string Description,
+    List<string> Tags,
+    TasteProfile Taste,
+    List<string> MissingIngredients);
+
+public record BarStats(int BottlesInStock, int BottlesTotal, int ReadyToMake, int OneBottleAway);
+
+public record ColorFamily(string Id, string Label, string Swatch, IReadOnlyList<string> Match);
 
 public record ShoppingListItem(
     string IngredientName,
@@ -350,26 +332,3 @@ public record ShoppingListItem(
     int RecipesUnlockedIfBought,
     List<string> SampleRecipes);
 
-public sealed record SearchCriteria(
-    string? Query = null,
-    bool OnlyMakeable = false,
-    IReadOnlyList<string>? Ingredients = null,
-    IReadOnlyList<string>? Styles = null,
-    IReadOnlyList<Technique>? Techniques = null,
-    string? Glassware = null,
-    string? Method = null,
-    PrepTimeBucket? PrepTime = null,
-    DifficultyLevel? Difficulty = null);
-
-public sealed record RecipeFacetsSummary(
-    IReadOnlyList<string> Glassware,
-    IReadOnlyList<string> Methods);
-
-public sealed record RecipeVariation(
-    int Id,
-    string Name,
-    string Glassware,
-    string Method,
-    double Similarity,
-    IReadOnlyList<string> SharedIngredients,
-    IReadOnlyList<string> NewIngredients);

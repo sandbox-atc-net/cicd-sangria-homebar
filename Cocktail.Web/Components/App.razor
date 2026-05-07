@@ -1,4 +1,5 @@
-﻿<!DOCTYPE html>
+@inject Microsoft.AspNetCore.Components.NavigationManager Nav
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -9,11 +10,21 @@
     <link rel="stylesheet" href="@Assets["Cocktail.Web.styles.css"]" />
     <ImportMap />
     <HeadOutlet />
+    <script>
+        // Apply persisted theme before first paint to avoid flash.
+        (function () {
+            try {
+                var t = localStorage.getItem('sangria.theme') || 'light';
+                document.documentElement.dataset.theme = t;
+            } catch (e) { }
+        })();
+    </script>
 </head>
 
 <body>
     <Routes />
     <script src="_framework/blazor.web.js"></script>
+    <script src="js/sangria.js"></script>
     <script src="js/speech.js"></script>
 </body>
 

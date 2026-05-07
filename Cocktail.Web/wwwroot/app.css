@@ -83,3 +83,45 @@ h1 { margin-top: 0; }
 .bar-row .name { flex: 1; }
 .bar-row .status { font-size: 0.85rem; color: #666; }
 .bar-row.out-stock { opacity: 0.55; }
+
+.voice-options { display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap; margin: 0.5rem 0 1rem; font-size: 0.9rem; color: #555; }
+.voice-options .toggle { display: flex; gap: 0.4rem; align-items: center; cursor: pointer; }
+.voice-options .rate { display: flex; gap: 0.4rem; align-items: center; }
+.voice-options .rate input[type=range] { width: 120px; }
+
+.wake-chip { padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.02em; }
+.wake-chip.idle { background: #ece5d6; color: #6e6655; }
+.wake-chip.armed { background: #f6e0b9; color: #7a4a0d; box-shadow: 0 0 0 2px #d99a2b inset; }
+
+.conversion-flash { margin: 0.5rem 0; padding: 0.6rem 0.8rem; background: #e9f5ee; border-left: 3px solid #2ea043; border-radius: 0.3rem; font-weight: 600; color: #1e5b32; }
+
+.timer-overlay { position: fixed; right: 1.5rem; bottom: 1.5rem; z-index: 100; }
+.timer-card { background: #1f2933; color: #f5dab1; padding: 1.1rem 1.4rem; border-radius: 0.8rem; box-shadow: 0 6px 20px rgba(0,0,0,0.25); min-width: 200px; text-align: center; }
+.timer-card .timer-label { font-size: 0.85rem; opacity: 0.75; text-transform: uppercase; letter-spacing: 0.05em; }
+.timer-card .timer-display { font-size: 2.6rem; font-weight: 700; font-variant-numeric: tabular-nums; margin: 0.25rem 0 0.5rem; }
+.timer-card .timer-bar { height: 6px; background: rgba(255,255,255,0.15); border-radius: 999px; overflow: hidden; margin-bottom: 0.7rem; }
+.timer-card .timer-bar-fill { height: 100%; background: #d99a2b; transition: width 0.25s linear; }
+.timer-card .btn { background: transparent; border-color: rgba(245,218,177,0.5); color: #f5dab1; }
+.timer-card .btn:hover:not(:disabled) { background: rgba(245,218,177,0.1); }
+
+.ready-banner { padding: 0.75rem 1rem; background: #e9f5ee; border-left: 4px solid #2ea043; border-radius: 0.4rem; margin-bottom: 1rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+.ready-banner.empty { background: #fff8e7; border-left-color: #d99a2b; }
+.ready-banner strong { color: #1e5b32; }
+.btn-link { background: none; border: none; color: #1e5b32; cursor: pointer; font: inherit; padding: 0; text-decoration: underline; }
+.btn-link:hover { color: #0f3d20; }
+
+.bar-hint { color: #666; font-size: 0.85rem; flex: 1 1 200px; }
+
+.ingredient.missing { background: #fff8e7; border-radius: 0.3rem; padding: 0.4rem 0.5rem; }
+.ingredient.missing .out-pill { display: inline-block; margin-left: 0.5rem; font-size: 0.7rem; font-weight: 600; padding: 0.1rem 0.45rem; border-radius: 999px; background: #d99a2b; color: #fff; vertical-align: middle; }
+.sub-hint { font-size: 0.85rem; color: #6e4a13; margin-top: 0.2rem; font-style: italic; }
+
+.shopping-list { list-style: none; padding: 0; }
+.shopping-row { display: flex; gap: 1rem; align-items: center; background: #fff; padding: 0.85rem 1rem; border-radius: 0.5rem; margin-bottom: 0.5rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.shopping-main { flex: 1; }
+.shopping-name { font-weight: 600; font-size: 1.05rem; }
+.shopping-stats { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.3rem 0; }
+.shopping-stats .badge { font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.55rem; border-radius: 999px; }
+.shopping-stats .badge.unlock { background: #2ea043; color: #fff; }
+.shopping-stats .badge.needed { background: #ece5d6; color: #6e6655; }
+.shopping-samples { font-size: 0.85rem; color: #666; }

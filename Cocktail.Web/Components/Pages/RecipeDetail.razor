@@ -1,8 +1,11 @@
 @page "/recipe/{Id:int}"
 @rendermode InteractiveServer
+@using System.Globalization
 @using Cocktail.Web.Data
+@using Cocktail.Web.Services
 @implements IAsyncDisposable
 @inject Cocktail.Web.Services.RecipeService Recipes
+@inject Cocktail.Web.Services.SubstitutionService Subs
 @inject IJSRuntime JS
 
 <PageTitle>@(recipe?.Name ?? "Recipe")</PageTitle>
@@ -23,7 +26,15 @@ else
         <ul>
             @foreach (var ing in recipe.Ingredients)
             {
-                <li><strong>@ing.Amount</strong> @ing.IngredientName</li>
+                var missing = !inStock.Contains(ing.IngredientName.ToLowerInvariant());
+                var subs = missing ? Subs.Suggest(ing.IngredientName) : Array.Empty<string>();
+                <li class="@(missing ? "ingredient missing" : "ingredient")">
+                    <div><strong>@ing.Amount</strong> @ing.IngredientName @if (missing) { <span class="out-pill">out</span> }</div>
+                    @if (subs.Count > 0)
+                    {
+                        <div class="sub-hint">No @ing.IngredientName? Try @string.Join(", ", subs).</div>
+                    }
+                </li>
             }
         </ul>
     </section>
@@ -37,9 +48,35 @@ else
             </button>
             <button @onclick="Prev" class="btn" disabled="@(stepIndex <= 0)">◀ Back</button>
             <button @onclick="Repeat" class="btn">Repeat</button>
-            <button @onclick="Next" class="btn" disabled="@(stepIndex >= recipe.Steps.Count - 1)">Next ▶</button>
+            <button @onclick="Next" class="btn">Next ▶</button>
+            <button @onclick="ReadIngredients" class="btn">Read ingredients</button>
         </div>
 
+        <div class="voice-options">
+            <label class="toggle">
+                <input type="checkbox" checked="@wakeMode" @onchange="OnWakeModeChanged" />
+                Wake-word mode
+            </label>
+            <label class="rate">
+                Speed
+                <input type="range" min="0.7" max="1.4" step="0.05"
+                       value="@ttsRate.ToString("0.00", CultureInfo.InvariantCulture)"
+                       @onchange="OnRateChanged" />
+                <span>@ttsRate.ToString("0.00", CultureInfo.InvariantCulture)×</span>
+            </label>
+            @if (wakeMode && listening)
+            {
+                var armed = lastWakeAt is not null && DateTime.UtcNow - lastWakeAt.Value < WakeWindow;
+                <span class="wake-chip @(armed ? "armed" : "idle")">
+                    @(armed ? "armed — speak a command" : "say \"hey bartender\"")
+                </span>
+            }
+        </div>
+
+        @if (conversionFlash is not null)
+        {
+            <div class="conversion-flash">@conversionFlash</div>
+        }
         @if (lastHeard is not null)
         {
             <div class="heard">Heard: <em>@lastHeard</em></div>
@@ -58,34 +95,59 @@ else
             }
         </ol>
     </section>
+
+    <CountdownTimer @ref="timerComponent" OnComplete="OnTimerComplete" />
 }
 
 @code {
+    private static readonly TimeSpan WakeWindow = TimeSpan.FromSeconds(6);
+
     [Parameter] public int Id { get; set; }
 
     Recipe? recipe;
+    HashSet<string> inStock = new(StringComparer.OrdinalIgnoreCase);
     int stepIndex;
     bool listening;
+    bool wakeMode;
+    DateTime? lastWakeAt;
     string? lastHeard;
     string? errorText;
+    string? conversionFlash;
+    double ttsRate = 1.0;
+    bool timerStartedHandsFree;
+    bool ttsRateLoaded;
 
+    CountdownTimer? timerComponent;
     DotNetObjectReference<RecipeDetail>? selfRef;
+    CancellationTokenSource? flashCts;
 
     protected override async Task OnInitializedAsync()
     {
         recipe = await Recipes.GetAsync(Id, CancellationToken.None);
+        inStock = await Recipes.GetInStockNamesAsync(CancellationToken.None);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || ttsRateLoaded) return;
+        ttsRateLoaded = true;
+        try
+        {
+            var stored = await JS.InvokeAsync<string?>("localStorage.getItem", "cocktail.ttsRate");
+            if (!string.IsNullOrEmpty(stored)
+                && double.TryParse(stored, NumberStyles.Number, CultureInfo.InvariantCulture, out var v))
+            {
+                ttsRate = Math.Clamp(v, 0.7, 1.4);
+                StateHasChanged();
+            }
+        }
+        catch { /* localStorage unavailable */ }
     }
 
     async Task ToggleListening()
     {
-        if (listening)
-        {
-            await StopListening();
-        }
-        else
-        {
-            await StartListening();
-        }
+        if (listening) await StopListening();
+        else await StartListening();
     }
 
     async Task StartListening()
@@ -100,7 +162,8 @@ else
         }
         listening = true;
         errorText = null;
-        await Speak(CurrentInstruction());
+        if (!wakeMode) await Speak(CurrentInstruction());
+        else await Speak("Listening for 'hey bartender'.");
     }
 
     async Task StopListening()
@@ -108,22 +171,150 @@ else
         await JS.InvokeVoidAsync("speech.stopRecognition");
         await JS.InvokeVoidAsync("speech.cancelSpeech");
         listening = false;
+        lastWakeAt = null;
     }
 
     async Task Prev()
     {
-        if (stepIndex > 0) stepIndex--;
-        await Speak(CurrentInstruction());
+        if (recipe is null) return;
+        if (stepIndex > 0)
+        {
+            stepIndex--;
+            await Speak(CurrentInstruction());
+        }
+        else
+        {
+            await Speak("This is the first step.");
+        }
     }
 
     async Task Next()
     {
         if (recipe is null) return;
-        if (stepIndex < recipe.Steps.Count - 1) stepIndex++;
-        await Speak(CurrentInstruction());
+        if (stepIndex < recipe.Steps.Count - 1)
+        {
+            stepIndex++;
+            await Speak(CurrentInstruction());
+        }
+        else
+        {
+            await Speak("That's everything. Enjoy your drink.");
+        }
     }
 
     Task Repeat() => Speak(CurrentInstruction());
+
+    async Task JumpToStep(int stepNumber)
+    {
+        if (recipe is null) return;
+        var idx = stepNumber - 1;
+        if (idx < 0 || idx >= recipe.Steps.Count)
+        {
+            await Speak($"That recipe only has {recipe.Steps.Count} steps.");
+            return;
+        }
+        stepIndex = idx;
+        await Speak(CurrentInstruction());
+    }
+
+    async Task ReadIngredients()
+    {
+        if (recipe is null || recipe.Ingredients.Count == 0) return;
+        var parts = recipe.Ingredients
+            .Select(i =>
+            {
+                var amount = SpeakableFormatter.FormatAmount(i.Amount ?? "");
+                return string.IsNullOrEmpty(amount)
+                    ? i.IngredientName
+                    : $"{amount} {i.IngredientName}";
+            })
+            .ToList();
+        await Speak("You'll need: " + string.Join(", ", parts) + ".");
+    }
+
+    async Task StartTimer(TimeSpan duration)
+    {
+        if (timerComponent is null || duration <= TimeSpan.Zero) return;
+        timerStartedHandsFree = listening;
+        var stepLabel = recipe is { Steps.Count: > 0 } ? $"Step {stepIndex + 1}" : "Timer";
+        await timerComponent.StartAsync(duration, stepLabel);
+        await Speak($"Timer set for {HumanDuration(duration)}.");
+    }
+
+    async Task OnTimerComplete()
+    {
+        await Speak("Time's up.");
+        if (timerStartedHandsFree && recipe is not null && stepIndex < recipe.Steps.Count - 1)
+        {
+            await Task.Delay(700);
+            await Next();
+        }
+        timerStartedHandsFree = false;
+    }
+
+    async Task SpeakTimerStatus()
+    {
+        if (timerComponent is null || !timerComponent.IsActive)
+        {
+            await Speak("No timer running.");
+            return;
+        }
+        var sec = (int)Math.Ceiling(timerComponent.Remaining.TotalSeconds);
+        await Speak(sec == 1 ? "One second remaining." : $"{SpeakableFormatter.SpellOut(sec)} seconds remaining.");
+    }
+
+    async Task DoConvert(ConvertIntent intent)
+    {
+        if (!UnitConverter.TryConvert(intent.Amount, intent.FromUnit, intent.ToUnit, out var result))
+        {
+            await Speak("Sorry, I don't know one of those units.");
+            return;
+        }
+        var fromShort = $"{UnitConverter.FormatNumber(intent.Amount)} {UnitConverter.Singular(intent.FromUnit)}";
+        var toShort = $"{UnitConverter.FormatNumber(result)} {UnitConverter.Singular(intent.ToUnit)}";
+        await FlashConversionAsync($"{fromShort} = {toShort}");
+
+        var fromSpoken = SpokenAmount(intent.Amount, intent.FromUnit);
+        var toSpoken = SpokenAmount(result, intent.ToUnit);
+        await Speak($"{fromSpoken} is {toSpoken}.");
+    }
+
+    static string SpokenAmount(decimal amount, string unit)
+    {
+        var spelled = SpeakableFormatter.SpellOut(amount);
+        var spokenUnit = UnitConverter.Spoken(unit, amount);
+        return $"{spelled} {spokenUnit}";
+    }
+
+    static string HumanDuration(TimeSpan d)
+    {
+        if (d.TotalMinutes >= 1)
+        {
+            var minutes = (int)Math.Round(d.TotalMinutes);
+            return $"{SpeakableFormatter.SpellOut(minutes)} {(minutes == 1 ? "minute" : "minutes")}";
+        }
+        var sec = Math.Max(1, (int)Math.Round(d.TotalSeconds));
+        return $"{SpeakableFormatter.SpellOut(sec)} {(sec == 1 ? "second" : "seconds")}";
+    }
+
+    async Task FlashConversionAsync(string text)
+    {
+        flashCts?.Cancel();
+        flashCts = new CancellationTokenSource();
+        var token = flashCts.Token;
+        conversionFlash = text;
+        StateHasChanged();
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), token);
+            if (!token.IsCancellationRequested)
+            {
+                conversionFlash = null;
+                StateHasChanged();
+            }
+        }
+        catch (TaskCanceledException) { /* superseded */ }
+    }
 
     string CurrentInstruction()
     {
@@ -134,38 +325,122 @@ else
     async Task Speak(string text)
     {
         if (string.IsNullOrEmpty(text)) return;
-        await JS.InvokeVoidAsync("speech.speak", text, "en-US", 1.0);
+        await JS.InvokeVoidAsync("speech.speak", text, "en-US", ttsRate);
+    }
+
+    async Task OnWakeModeChanged(ChangeEventArgs e)
+    {
+        wakeMode = e.Value is bool b && b;
+        lastWakeAt = null;
+        if (listening)
+        {
+            await Speak(wakeMode
+                ? "Wake-word mode on. Say 'hey bartender' to send a command."
+                : "Wake-word mode off.");
+        }
+    }
+
+    async Task OnRateChanged(ChangeEventArgs e)
+    {
+        if (e.Value is null) return;
+        if (!double.TryParse(e.Value.ToString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var v))
+            return;
+        ttsRate = Math.Clamp(v, 0.7, 1.4);
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "localStorage.setItem",
+                "cocktail.ttsRate",
+                ttsRate.ToString("0.00", CultureInfo.InvariantCulture));
+        }
+        catch { /* ignore */ }
     }
 
     [JSInvokable]
     public async Task OnSpeechHeard(string transcript)
     {
         lastHeard = transcript;
-        var t = transcript.ToLowerInvariant();
-
-        if (Contains(t, "next", "continue", "forward"))
-        {
-            await Next();
-        }
-        else if (Contains(t, "back", "previous", "go back"))
-        {
-            await Prev();
-        }
-        else if (Contains(t, "repeat", "again", "say again", "what was that"))
-        {
-            await Repeat();
-        }
-        else if (Contains(t, "stop", "pause", "quiet", "silence"))
-        {
-            await JS.InvokeVoidAsync("speech.cancelSpeech");
-        }
-        else if (Contains(t, "start over", "restart", "from the top"))
-        {
-            stepIndex = 0;
-            await Speak(CurrentInstruction());
-        }
-
+        var intent = VoiceParser.Parse(transcript);
+        await Dispatch(intent);
         await InvokeAsync(StateHasChanged);
+    }
+
+    async Task Dispatch(VoiceIntent intent)
+    {
+        if (wakeMode)
+        {
+            if (intent is WakeWordIntent)
+            {
+                lastWakeAt = DateTime.UtcNow;
+                StateHasChanged();
+                await Speak("Yes?");
+                ScheduleWakeChipExpiry();
+                return;
+            }
+            if (lastWakeAt is null || DateTime.UtcNow - lastWakeAt.Value > WakeWindow)
+            {
+                return;
+            }
+        }
+        else if (intent is WakeWordIntent)
+        {
+            return;
+        }
+
+        switch (intent)
+        {
+            case NextStepIntent:
+                await Next();
+                break;
+            case PrevStepIntent:
+                await Prev();
+                break;
+            case RepeatIntent:
+                await Repeat();
+                break;
+            case PauseTtsIntent:
+                await JS.InvokeVoidAsync("speech.cancelSpeech");
+                break;
+            case StartOverIntent:
+                stepIndex = 0;
+                await Speak(CurrentInstruction());
+                break;
+            case JumpToStepIntent jump:
+                await JumpToStep(jump.StepNumber);
+                break;
+            case ReadIngredientsIntent:
+                await ReadIngredients();
+                break;
+            case StartTimerIntent t:
+                await StartTimer(t.Duration);
+                break;
+            case CancelTimerIntent:
+                if (timerComponent is { IsActive: true })
+                {
+                    await timerComponent.Cancel();
+                    await Speak("Timer cancelled.");
+                }
+                break;
+            case TimerStatusIntent:
+                await SpeakTimerStatus();
+                break;
+            case ConvertIntent c:
+                await DoConvert(c);
+                break;
+        }
+    }
+
+    void ScheduleWakeChipExpiry()
+    {
+        var snapshot = lastWakeAt;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(WakeWindow + TimeSpan.FromMilliseconds(250));
+            if (lastWakeAt == snapshot)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        });
     }
 
     [JSInvokable]
@@ -183,20 +458,14 @@ else
     public Task OnSpeechStopped()
     {
         listening = false;
+        lastWakeAt = null;
         return InvokeAsync(StateHasChanged);
-    }
-
-    static bool Contains(string text, params string[] phrases)
-    {
-        foreach (var p in phrases)
-        {
-            if (text.Contains(p, StringComparison.Ordinal)) return true;
-        }
-        return false;
     }
 
     public async ValueTask DisposeAsync()
     {
+        flashCts?.Cancel();
+        flashCts?.Dispose();
         try
         {
             await JS.InvokeVoidAsync("speech.stopRecognition");

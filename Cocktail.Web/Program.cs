@@ -13,6 +13,7 @@ builder.Services.AddDbContextFactory<CocktailDb>(opt =>
     opt.UseSqlite($"Data Source={dbPath}"));
 
 builder.Services.AddScoped<RecipeService>();
+builder.Services.AddSingleton<SubstitutionService>();
 
 var app = builder.Build();
 

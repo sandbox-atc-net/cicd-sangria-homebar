@@ -1,0 +1,122 @@
+@using System.Globalization
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@if (active)
+{
+    <div class="timer-overlay" role="status" aria-live="polite">
+        <div class="timer-card">
+            <div class="timer-label">@(string.IsNullOrEmpty(label) ? "Timer" : label)</div>
+            <div class="timer-display">@FormatRemaining()</div>
+            <div class="timer-bar"><div class="timer-bar-fill" style="width:@Percent()%"></div></div>
+            <button class="btn" @onclick="Cancel">Cancel</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public EventCallback OnComplete { get; set; }
+
+    private System.Timers.Timer? ticker;
+    private DateTime endsAt;
+    private TimeSpan totalDuration;
+    private string? label;
+    private bool active;
+
+    public bool IsActive => active;
+
+    public TimeSpan Remaining
+    {
+        get
+        {
+            if (!active) return TimeSpan.Zero;
+            var r = endsAt - DateTime.UtcNow;
+            return r > TimeSpan.Zero ? r : TimeSpan.Zero;
+        }
+    }
+
+    public async Task StartAsync(TimeSpan duration, string? labelText = null)
+    {
+        StopTicker();
+        totalDuration = duration;
+        endsAt = DateTime.UtcNow + duration;
+        label = labelText;
+        active = true;
+
+        ticker = new System.Timers.Timer(250) { AutoReset = true };
+        ticker.Elapsed += OnTickerElapsed;
+        ticker.Start();
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public Task Cancel() => StopAsync(fireCompleted: false);
+
+    private void OnTickerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
+    {
+        _ = InvokeAsync(TickAsync);
+    }
+
+    private async Task TickAsync()
+    {
+        if (!active) return;
+        if (DateTime.UtcNow >= endsAt)
+        {
+            await StopAsync(fireCompleted: true);
+        }
+        else
+        {
+            StateHasChanged();
+        }
+    }
+
+    private async Task StopAsync(bool fireCompleted)
+    {
+        StopTicker();
+        active = false;
+        StateHasChanged();
+        if (fireCompleted)
+        {
+            try { await JS.InvokeVoidAsync("speech.playClink"); }
+            catch { /* circuit may be gone */ }
+            await OnComplete.InvokeAsync();
+        }
+    }
+
+    private void StopTicker()
+    {
+        if (ticker is null) return;
+        ticker.Stop();
+        ticker.Elapsed -= OnTickerElapsed;
+        ticker.Dispose();
+        ticker = null;
+    }
+
+    private string FormatRemaining()
+    {
+        var r = endsAt - DateTime.UtcNow;
+        if (r < TimeSpan.Zero) r = TimeSpan.Zero;
+        if (r.TotalMinutes >= 1)
+        {
+            var minutes = (int)Math.Floor(r.TotalMinutes);
+            var seconds = r.Seconds;
+            return $"{minutes}:{seconds:00}";
+        }
+        return ((int)Math.Ceiling(r.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
+    }
+
+    private int Percent()
+    {
+        if (totalDuration.TotalMilliseconds <= 0) return 0;
+        var elapsed = totalDuration - (endsAt - DateTime.UtcNow);
+        if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
+        if (elapsed > totalDuration) elapsed = totalDuration;
+        return (int)(elapsed.TotalMilliseconds * 100d / totalDuration.TotalMilliseconds);
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        StopTicker();
+        return ValueTask.CompletedTask;
+    }
+}
